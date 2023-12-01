@@ -7,6 +7,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/p2p/transport/webrtc/pb"
+	"google.golang.org/protobuf/proto"
 )
 
 var errWriteAfterClose = errors.New("write after close")
@@ -25,14 +26,8 @@ func (s *stream) Write(b []byte) (int, error) {
 	switch s.sendState {
 	case sendStateReset:
 		return 0, network.ErrReset
-	case sendStateDataSent:
+	case sendStateDataSent, sendStateDataReceived:
 		return 0, errWriteAfterClose
-	}
-
-	// Check if there is any message on the wire. This is used for control
-	// messages only when the read side of the stream is closed
-	if s.receiveState != receiveStateReceiving {
-		s.readLoopOnce.Do(s.spawnControlMessageReader)
 	}
 
 	if !s.writeDeadline.IsZero() && time.Now().After(s.writeDeadline) {
@@ -54,7 +49,7 @@ func (s *stream) Write(b []byte) (int, error) {
 		switch s.sendState {
 		case sendStateReset:
 			return n, network.ErrReset
-		case sendStateDataSent:
+		case sendStateDataSent, sendStateDataReceived:
 			return n, errWriteAfterClose
 		}
 
@@ -100,37 +95,13 @@ func (s *stream) Write(b []byte) (int, error) {
 			end = len(b)
 		}
 		msg := &pb.Message{Message: b[:end]}
-		if err := s.writer.WriteMsg(msg); err != nil {
+		if err := s.writeMsgOnWriter(msg); err != nil {
 			return n, err
 		}
 		n += end
 		b = b[end:]
 	}
 	return n, nil
-}
-
-// used for reading control messages while writing, in case the reader is closed,
-// as to ensure we do still get control messages. This is important as according to the spec
-// our data and control channels are intermixed on the same conn.
-func (s *stream) spawnControlMessageReader() {
-	if s.nextMessage != nil {
-		s.processIncomingFlag(s.nextMessage.Flag)
-		s.nextMessage = nil
-	}
-
-	go func() {
-		// no deadline needed, Read will return once there's a new message, or an error occurred
-		_ = s.dataChannel.SetReadDeadline(time.Time{})
-		for {
-			var msg pb.Message
-			if err := s.reader.ReadMsg(&msg); err != nil {
-				return
-			}
-			s.mx.Lock()
-			s.processIncomingFlag(msg.Flag)
-			s.mx.Unlock()
-		}
-	}()
 }
 
 func (s *stream) SetWriteDeadline(t time.Time) error {
@@ -153,24 +124,12 @@ func (s *stream) availableSendSpace() int {
 	return availableSpace
 }
 
-// There's no way to determine the size of a Protobuf message in the pbio package.
-// Setting the size to 100 works as long as the control messages (incl. the varint prefix) are smaller than that value.
-const controlMsgSize = 100
-
-func (s *stream) sendControlMessage(msg *pb.Message) error {
-	available := s.availableSendSpace()
-	if controlMsgSize < available {
-		return s.writer.WriteMsg(msg)
-	}
-	s.controlMsgQueue = append(s.controlMsgQueue, msg)
-	return nil
-}
-
 func (s *stream) cancelWrite() error {
 	s.mx.Lock()
 	defer s.mx.Unlock()
 
-	if s.sendState != sendStateSending {
+	// Don't wait for FIN_ACK on reset
+	if s.sendState != sendStateSending && s.sendState != sendStateDataSent {
 		return nil
 	}
 	s.sendState = sendStateReset
@@ -178,10 +137,9 @@ func (s *stream) cancelWrite() error {
 	case s.sendStateChanged <- struct{}{}:
 	default:
 	}
-	if err := s.sendControlMessage(&pb.Message{Flag: pb.Message_RESET.Enum()}); err != nil {
+	if err := s.writeMsgOnWriter(&pb.Message{Flag: pb.Message_RESET.Enum()}); err != nil {
 		return err
 	}
-	s.maybeDeclareStreamDone()
 	return nil
 }
 
@@ -193,9 +151,18 @@ func (s *stream) CloseWrite() error {
 		return nil
 	}
 	s.sendState = sendStateDataSent
-	if err := s.sendControlMessage(&pb.Message{Flag: pb.Message_FIN.Enum()}); err != nil {
+	select {
+	case s.sendStateChanged <- struct{}{}:
+	default:
+	}
+	if err := s.writeMsgOnWriter(&pb.Message{Flag: pb.Message_FIN.Enum()}); err != nil {
 		return err
 	}
-	s.maybeDeclareStreamDone()
 	return nil
+}
+
+func (s *stream) writeMsgOnWriter(msg proto.Message) error {
+	s.writerMx.Lock()
+	defer s.writerMx.Unlock()
+	return s.writer.WriteMsg(msg)
 }

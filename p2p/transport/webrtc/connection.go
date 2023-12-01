@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"sync"
-	"sync/atomic"
 
 	ic "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -25,9 +23,7 @@ import (
 
 var _ tpt.CapableConn = &connection{}
 
-const maxAcceptQueueLen = 10
-
-const maxDataChannelID = 1 << 10
+const maxAcceptQueueLen = 256
 
 type errConnectionTimeout struct{}
 
@@ -47,7 +43,8 @@ type connection struct {
 	transport *WebRTCTransport
 	scope     network.ConnManagementScope
 
-	closeErr error
+	closeOnce sync.Once
+	closeErr  error
 
 	localPeer      peer.ID
 	localMultiaddr ma.Multiaddr
@@ -56,9 +53,8 @@ type connection struct {
 	remoteKey       ic.PubKey
 	remoteMultiaddr ma.Multiaddr
 
-	m            sync.Mutex
-	streams      map[uint16]*stream
-	nextStreamID atomic.Int32
+	m       sync.Mutex
+	streams map[uint16]*stream
 
 	acceptQueue chan dataChannel
 
@@ -97,23 +93,10 @@ func newConnection(
 
 		acceptQueue: make(chan dataChannel, maxAcceptQueueLen),
 	}
-	switch direction {
-	case network.DirInbound:
-		c.nextStreamID.Store(1)
-	case network.DirOutbound:
-		// stream ID 0 is used for the Noise handshake stream
-		c.nextStreamID.Store(2)
-	}
 
 	pc.OnConnectionStateChange(c.onConnectionStateChange)
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		if c.IsClosed() {
-			return
-		}
-		// Limit the number of streams, since we're not able to actually properly close them.
-		// See https://github.com/libp2p/specs/issues/575 for details.
-		if *dc.ID() > maxDataChannelID {
-			c.Close()
 			return
 		}
 		dc.OnOpen(func() {
@@ -133,7 +116,6 @@ func newConnection(
 			}
 		})
 	})
-
 	return c, nil
 }
 
@@ -144,16 +126,41 @@ func (c *connection) ConnState() network.ConnectionState {
 
 // Close closes the underlying peerconnection.
 func (c *connection) Close() error {
-	if c.IsClosed() {
-		return nil
-	}
+	c.closeOnce.Do(func() {
+		c.closeErr = errors.New("connection closed")
+		// cancel must be called after closeErr is set. This ensures interested goroutines waiting on
+		// ctx.Done can read closeErr without holding the conn lock.
+		c.cancel()
+		c.m.Lock()
+		streams := c.streams
+		c.streams = nil
+		c.m.Unlock()
+		for _, str := range streams {
+			str.Reset()
+		}
+		c.pc.Close()
+		c.scope.Done()
+	})
+	return nil
+}
 
-	c.m.Lock()
-	defer c.m.Unlock()
-	c.scope.Done()
-	c.closeErr = errors.New("connection closed")
-	c.cancel()
-	return c.pc.Close()
+func (c *connection) closeTimedOut() error {
+	c.closeOnce.Do(func() {
+		c.closeErr = errConnectionTimeout{}
+		// cancel must be called after closeErr is set. This ensures interested goroutines waiting on
+		// ctx.Done can read closeErr without holding the conn lock.
+		c.cancel()
+		c.m.Lock()
+		streams := c.streams
+		c.streams = nil
+		c.m.Unlock()
+		for _, str := range streams {
+			str.closeWithError(errConnectionTimeout{})
+		}
+		c.pc.Close()
+		c.scope.Done()
+	})
+	return nil
 }
 
 func (c *connection) IsClosed() bool {
@@ -170,19 +177,7 @@ func (c *connection) OpenStream(ctx context.Context) (network.MuxedStream, error
 		return nil, c.closeErr
 	}
 
-	id := c.nextStreamID.Add(2) - 2
-	if id > math.MaxUint16 {
-		return nil, errors.New("exhausted stream ID space")
-	}
-	// Limit the number of streams, since we're not able to actually properly close them.
-	// See https://github.com/libp2p/specs/issues/575 for details.
-	if id > maxDataChannelID {
-		c.Close()
-		return c.OpenStream(ctx)
-	}
-
-	streamID := uint16(id)
-	dc, err := c.pc.CreateDataChannel("", &webrtc.DataChannelInit{ID: &streamID})
+	dc, err := c.pc.CreateDataChannel("", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -190,9 +185,10 @@ func (c *connection) OpenStream(ctx context.Context) (network.MuxedStream, error
 	if err != nil {
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
-	str := newStream(dc, rwc, func() { c.removeStream(streamID) })
+	fmt.Println("opened dc with ID: ", *dc.ID())
+	str := newStream(dc, rwc, func() { c.removeStream(*dc.ID()) })
 	if err := c.addStream(str); err != nil {
-		str.Close()
+		str.Reset()
 		return nil, err
 	}
 	return str, nil
@@ -205,7 +201,7 @@ func (c *connection) AcceptStream() (network.MuxedStream, error) {
 	case dc := <-c.acceptQueue:
 		str := newStream(dc.channel, dc.stream, func() { c.removeStream(*dc.channel.ID()) })
 		if err := c.addStream(str); err != nil {
-			str.Close()
+			str.Reset()
 			return nil, err
 		}
 		return str, nil
@@ -223,6 +219,9 @@ func (c *connection) Transport() tpt.Transport      { return c.transport }
 func (c *connection) addStream(str *stream) error {
 	c.m.Lock()
 	defer c.m.Unlock()
+	if c.IsClosed() {
+		return fmt.Errorf("connection closed: %w", c.closeErr)
+	}
 	if _, ok := c.streams[str.id]; ok {
 		return errors.New("stream ID already exists")
 	}
@@ -238,20 +237,7 @@ func (c *connection) removeStream(id uint16) {
 
 func (c *connection) onConnectionStateChange(state webrtc.PeerConnectionState) {
 	if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
-		// reset any streams
-		if c.IsClosed() {
-			return
-		}
-		c.m.Lock()
-		defer c.m.Unlock()
-		c.closeErr = errConnectionTimeout{}
-		for k, str := range c.streams {
-			str.setCloseError(c.closeErr)
-			delete(c.streams, k)
-		}
-		c.cancel()
-		c.scope.Done()
-		c.pc.Close()
+		c.closeTimedOut()
 	}
 }
 
