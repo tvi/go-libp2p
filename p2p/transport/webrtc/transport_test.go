@@ -481,6 +481,7 @@ func TestTransportWebRTC_RemoteReadsAfterClose(t *testing.T) {
 			return
 		}
 		err = stream.Close()
+		fmt.Println("closed!")
 		if err != nil {
 			done <- err
 			return
@@ -496,7 +497,55 @@ func TestTransportWebRTC_RemoteReadsAfterClose(t *testing.T) {
 	require.NoError(t, err)
 	// require write and close to complete
 	require.NoError(t, <-done)
+	stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 
+	buf := make([]byte, 10)
+	n, err := stream.Read(buf)
+	require.NoError(t, err)
+	require.Equal(t, n, 4)
+}
+
+func TestTransportWebRTC_RemoteReadsAfterAsyncClose(t *testing.T) {
+	tr, listeningPeer := getTransport(t)
+	listenMultiaddr := ma.StringCast("/ip4/127.0.0.1/udp/0/webrtc-direct")
+	listener, err := tr.Listen(listenMultiaddr)
+	require.NoError(t, err)
+
+	tr1, _ := getTransport(t)
+
+	done := make(chan error)
+	go func() {
+		lconn, err := listener.Accept()
+		if err != nil {
+			done <- err
+			return
+		}
+		s, err := lconn.AcceptStream()
+		if err != nil {
+			done <- err
+			return
+		}
+		_, err = s.Write([]byte{1, 2, 3, 4})
+		if err != nil {
+			done <- err
+			return
+		}
+		err = s.(*stream).AsyncClose(nil)
+		if err != nil {
+			done <- err
+			return
+		}
+		close(done)
+	}()
+
+	conn, err := tr1.Dial(context.Background(), listener.Multiaddr(), listeningPeer)
+	require.NoError(t, err)
+	// create a stream
+	stream, err := conn.OpenStream(context.Background())
+
+	require.NoError(t, err)
+	// require write and close to complete
+	require.NoError(t, <-done)
 	stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 
 	buf := make([]byte, 10)
