@@ -180,8 +180,8 @@ func (t *WebRTCTransport) CanDial(addr ma.Multiaddr) bool {
 // Listen returns a listener for addr.
 //
 // The IP, Port combination for addr must be exclusive to this listener as a WebRTC listener cannot
-// be multiplexed on the same port as other UDP based transports like QUIC and WebTransport. see
-// https://github.com/libp2p/go-libp2p/issues/2446 for details
+// be multiplexed on the same port as other UDP based transports like QUIC and WebTransport.
+// See https://github.com/libp2p/go-libp2p/issues/2446 for details.
 func (t *WebRTCTransport) Listen(addr ma.Multiaddr) (tpt.Listener, error) {
 	addr, wrtcComponent := ma.SplitLast(addr)
 	isWebrtc := wrtcComponent.Equal(webrtcComponent)
