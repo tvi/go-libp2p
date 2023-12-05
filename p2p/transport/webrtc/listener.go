@@ -291,8 +291,9 @@ func (l *listener) setupConnection(
 	}
 
 	// we do not yet know A's peer ID so accept any inbound
-	remotePubKey, err := l.transport.noiseHandshake(ctx, pc, handshakeChannel, "", crypto.SHA256, true)
+	remotePubKey, err := l.transport.noiseHandshake(ctx, conn, handshakeChannel, "", crypto.SHA256, true)
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 	remotePeer, err := peer.IDFromPublicKey(remotePubKey)

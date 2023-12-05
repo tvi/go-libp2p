@@ -331,7 +331,7 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 	// We need to set negotiated = true for this channel on both
 	// the client and server to avoid DCEP errors.
 	negotiated, id := handshakeChannelNegotiated, handshakeChannelID
-	rawHandshakeChannel, err := pc.CreateDataChannel("", &webrtc.DataChannelInit{
+	handshakeChannel, err := pc.CreateDataChannel("", &webrtc.DataChannelInit{
 		Negotiated: &negotiated,
 		ID:         &id,
 	})
@@ -371,12 +371,12 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 		return nil, errors.New("peerconnection opening timed out")
 	}
 
-	detached, err := getDetachedChannel(ctx, rawHandshakeChannel)
+	detached, err := getDetachedChannel(ctx, handshakeChannel)
 	if err != nil {
 		return nil, err
 	}
 	// set the local address from the candidate pair
-	cp, err := rawHandshakeChannel.Transport().Transport().ICETransport().GetSelectedCandidatePair()
+	cp, err := handshakeChannel.Transport().Transport().ICETransport().GetSelectedCandidatePair()
 	if cp == nil {
 		return nil, errors.New("ice connection did not have selected candidate pair: nil result")
 	}
@@ -384,7 +384,7 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 		return nil, fmt.Errorf("ice connection did not have selected candidate pair: error: %w", err)
 	}
 
-	channel := newStream(rawHandshakeChannel, detached, func() {})
+	s := newStream(handshakeChannel, detached, func() {})
 	// the local address of the selected candidate pair should be the
 	// local address for the connection, since different datachannels
 	// are multiplexed over the same SCTP connection
@@ -412,9 +412,10 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 		return nil, err
 	}
 
-	remotePubKey, err := t.noiseHandshake(ctx, pc, channel, p, remoteHashFunction, false)
+	remotePubKey, err := t.noiseHandshake(ctx, conn, s, p, remoteHashFunction, false)
 	if err != nil {
-		return conn, err
+		conn.Close()
+		return nil, err
 	}
 	if t.gater != nil && !t.gater.InterceptSecured(network.DirOutbound, p, conn) {
 		conn.Close()
@@ -497,8 +498,8 @@ func (t *WebRTCTransport) generateNoisePrologue(pc *webrtc.PeerConnection, hash 
 	return result, nil
 }
 
-func (t *WebRTCTransport) noiseHandshake(ctx context.Context, pc *webrtc.PeerConnection, datachannel *stream, peer peer.ID, hash crypto.Hash, inbound bool) (ic.PubKey, error) {
-	prologue, err := t.generateNoisePrologue(pc, hash, inbound)
+func (t *WebRTCTransport) noiseHandshake(ctx context.Context, c *connection, s *stream, peer peer.ID, hash crypto.Hash, inbound bool) (ic.PubKey, error) {
+	prologue, err := t.generateNoisePrologue(c.pc, hash, inbound)
 	if err != nil {
 		return nil, fmt.Errorf("generate prologue: %w", err)
 	}
@@ -513,12 +514,12 @@ func (t *WebRTCTransport) noiseHandshake(ctx context.Context, pc *webrtc.PeerCon
 	}
 	var secureConn sec.SecureConn
 	if inbound {
-		secureConn, err = sessionTransport.SecureOutbound(ctx, fakeStreamConn{datachannel}, peer)
+		secureConn, err = sessionTransport.SecureOutbound(ctx, netConnWrapper{s, c}, peer)
 		if err != nil {
 			return nil, fmt.Errorf("failed to secure inbound connection: %w", err)
 		}
 	} else {
-		secureConn, err = sessionTransport.SecureInbound(ctx, fakeStreamConn{datachannel}, peer)
+		secureConn, err = sessionTransport.SecureInbound(ctx, netConnWrapper{s, c}, peer)
 		if err != nil {
 			return nil, fmt.Errorf("failed to secure outbound connection: %w", err)
 		}
@@ -526,7 +527,15 @@ func (t *WebRTCTransport) noiseHandshake(ctx context.Context, pc *webrtc.PeerCon
 	return secureConn.RemotePublicKey(), nil
 }
 
-type fakeStreamConn struct{ *stream }
+type netConnWrapper struct {
+	*stream
+	*connection
+}
 
-func (fakeStreamConn) LocalAddr() net.Addr  { return nil }
-func (fakeStreamConn) RemoteAddr() net.Addr { return nil }
+func (netConnWrapper) LocalAddr() net.Addr  { return nil }
+func (netConnWrapper) RemoteAddr() net.Addr { return nil }
+
+func (f netConnWrapper) Close() error {
+	f.connection.Close()
+	return nil
+}
