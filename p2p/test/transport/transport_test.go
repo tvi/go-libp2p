@@ -684,7 +684,6 @@ func TestDiscoverPeerIDFromSecurityNegotiation(t *testing.T) {
 			// Try connecting with the bogus peer ID
 			err = h2.Connect(ctx, *ai)
 			require.Error(t, err, "somehow we successfully connected to a bogus peerID!")
-
 			// Extract the actual peer ID from the error
 			newPeerId, err := extractPeerIDFromError(err)
 			require.NoError(t, err)
