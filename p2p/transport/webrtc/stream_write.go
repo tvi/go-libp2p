@@ -7,7 +7,6 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/p2p/transport/webrtc/pb"
-	"google.golang.org/protobuf/proto"
 )
 
 var errWriteAfterClose = errors.New("write after close")
@@ -95,7 +94,7 @@ func (s *stream) Write(b []byte) (int, error) {
 			end = len(b)
 		}
 		msg := &pb.Message{Message: b[:end]}
-		if err := s.writeMsgOnWriter(msg); err != nil {
+		if err := s.writer.WriteMsg(msg); err != nil {
 			return n, err
 		}
 		n += end
@@ -137,7 +136,7 @@ func (s *stream) cancelWrite() error {
 	case s.sendStateChanged <- struct{}{}:
 	default:
 	}
-	if err := s.writeMsgOnWriter(&pb.Message{Flag: pb.Message_RESET.Enum()}); err != nil {
+	if err := s.writer.WriteMsg(&pb.Message{Flag: pb.Message_RESET.Enum()}); err != nil {
 		return err
 	}
 	return nil
@@ -155,14 +154,8 @@ func (s *stream) CloseWrite() error {
 	case s.sendStateChanged <- struct{}{}:
 	default:
 	}
-	if err := s.writeMsgOnWriter(&pb.Message{Flag: pb.Message_FIN.Enum()}); err != nil {
+	if err := s.writer.WriteMsg(&pb.Message{Flag: pb.Message_FIN.Enum()}); err != nil {
 		return err
 	}
 	return nil
-}
-
-func (s *stream) writeMsgOnWriter(msg proto.Message) error {
-	s.writerMx.Lock()
-	defer s.writerMx.Unlock()
-	return s.writer.WriteMsg(msg)
 }

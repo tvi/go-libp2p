@@ -314,9 +314,6 @@ func TestManyStreams(t *testing.T) {
 	const streamCount = 128
 	for _, tc := range transportsToTest {
 		t.Run(tc.Name, func(t *testing.T) {
-			if strings.Contains(tc.Name, "WebRTC") {
-				t.Skip("Pion doesn't correctly handle large queues of streams.")
-			}
 			h1 := tc.HostGenerator(t, TransportTestCaseOpts{NoRcmgr: true})
 			h2 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true, NoRcmgr: true})
 			defer h1.Close()
@@ -382,6 +379,9 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 	const streamCount = 1024
 	for _, tc := range transportsToTest {
 		t.Run(tc.Name, func(t *testing.T) {
+			if strings.Contains(tc.Name, "WebRTC") {
+				t.Skip("This test potentially exhausts the uint16 WebRTC stream ID space.")
+			}
 			listenerLimits := rcmgr.PartialLimitConfig{
 				PeerDefault: rcmgr.ResourceLimits{
 					Streams:         32,
@@ -425,9 +425,7 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 			workerCount := 4
 
 			var startWorker func(workerIdx int)
-			var wCount atomic.Int32
 			startWorker = func(workerIdx int) {
-				fmt.Println("worker count", wCount.Add(1))
 				wg.Add(1)
 				defer wg.Done()
 				for {
@@ -439,10 +437,7 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 					// Inline function so we can use defer
 					func() {
 						var didErr bool
-						defer func() {
-							x := completedStreams.Add(1)
-							fmt.Println("completed streams", x)
-						}()
+						defer completedStreams.Add(1)
 						defer func() {
 							// Only the first worker adds more workers
 							if workerIdx == 0 && !didErr && !sawFirstErr.Load() {
@@ -485,6 +480,7 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 								return
 							}
 							err = func(s network.Stream) error {
+								defer s.Close()
 								err = s.SetDeadline(time.Now().Add(100 * time.Millisecond))
 								if err != nil {
 									return err
@@ -512,12 +508,8 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 								return nil
 							}(s)
 							if err != nil && shouldRetry(err) {
-								fmt.Println("failed to write stream!", err)
-								s.Reset()
 								time.Sleep(50 * time.Millisecond)
 								continue
-							} else {
-								s.Close()
 							}
 							return
 
@@ -684,6 +676,7 @@ func TestDiscoverPeerIDFromSecurityNegotiation(t *testing.T) {
 			// Try connecting with the bogus peer ID
 			err = h2.Connect(ctx, *ai)
 			require.Error(t, err, "somehow we successfully connected to a bogus peerID!")
+
 			// Extract the actual peer ID from the error
 			newPeerId, err := extractPeerIDFromError(err)
 			require.NoError(t, err)

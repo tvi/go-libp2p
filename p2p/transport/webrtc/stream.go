@@ -74,11 +74,7 @@ type stream struct {
 	nextMessage  *pb.Message
 	receiveState receiveState
 
-	// writerMx ensures that only a single goroutine is calling WriteMsg on writer. writer is a
-	// pbio.uvarintWriter which is not thread safe. The public Write API is not promised to be
-	// thread safe, but we need to be able to write control messages concurrently
-	writerMx             sync.Mutex
-	writer               pbio.Writer
+	writer               pbio.Writer // concurrent writes prevented by mx
 	sendStateChanged     chan struct{}
 	sendState            sendState
 	writeDeadline        time.Time
@@ -232,7 +228,7 @@ func (s *stream) processIncomingFlag(flag *pb.Message_Flag) {
 		if s.receiveState == receiveStateReceiving {
 			s.receiveState = receiveStateDataRead
 		}
-		if err := s.writeMsgOnWriter(&pb.Message{Flag: pb.Message_FIN_ACK.Enum()}); err != nil {
+		if err := s.writer.WriteMsg(&pb.Message{Flag: pb.Message_FIN_ACK.Enum()}); err != nil {
 			log.Debugf("failed to send FIN_ACK: %s", err)
 			// Remote has finished writing all the data It'll stop waiting for the
 			// FIN_ACK eventually or will be notified when we close the datachannel

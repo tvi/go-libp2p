@@ -481,7 +481,6 @@ func TestTransportWebRTC_RemoteReadsAfterClose(t *testing.T) {
 			return
 		}
 		err = stream.Close()
-		fmt.Println("closed!")
 		if err != nil {
 			done <- err
 			return
