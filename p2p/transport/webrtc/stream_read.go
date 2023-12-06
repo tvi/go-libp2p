@@ -90,7 +90,7 @@ func (s *stream) CloseRead() error {
 	defer s.mx.Unlock()
 	var err error
 	if s.receiveState == receiveStateReceiving && s.closeErr == nil {
-		err = s.writeMsgOnWriter(&pb.Message{Flag: pb.Message_STOP_SENDING.Enum()})
+		err = s.writer.WriteMsg(&pb.Message{Flag: pb.Message_STOP_SENDING.Enum()})
 		s.receiveState = receiveStateReset
 	}
 	s.controlMessageReaderOnce.Do(s.spawnControlMessageReader)

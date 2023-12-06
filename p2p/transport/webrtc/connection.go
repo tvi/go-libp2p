@@ -185,7 +185,6 @@ func (c *connection) OpenStream(ctx context.Context) (network.MuxedStream, error
 	if err != nil {
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
-	fmt.Println("opened dc with ID: ", *dc.ID())
 	str := newStream(dc, rwc, func() { c.removeStream(*dc.ID()) })
 	if err := c.addStream(str); err != nil {
 		str.Reset()
