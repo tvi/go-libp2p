@@ -123,9 +123,6 @@ func newStream(
 
 	channel.SetBufferedAmountLowThreshold(bufferedAmountLowThreshold)
 	channel.OnBufferedAmountLow(func() {
-		s.mx.Lock()
-		defer s.mx.Unlock()
-
 		select {
 		case s.writeAvailable <- struct{}{}:
 		default:
