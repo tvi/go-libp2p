@@ -53,9 +53,6 @@ type connection struct {
 	remoteKey       ic.PubKey
 	remoteMultiaddr ma.Multiaddr
 
-	m       sync.Mutex
-	streams map[uint16]*stream
-
 	acceptQueue chan dataChannel
 
 	ctx    context.Context
@@ -89,7 +86,6 @@ func newConnection(
 		remoteMultiaddr: remoteMultiaddr,
 		ctx:             ctx,
 		cancel:          cancel,
-		streams:         make(map[uint16]*stream),
 
 		acceptQueue: make(chan dataChannel, maxAcceptQueueLen),
 	}
@@ -126,41 +122,26 @@ func (c *connection) ConnState() network.ConnectionState {
 
 // Close closes the underlying peerconnection.
 func (c *connection) Close() error {
-	c.closeOnce.Do(func() {
-		c.closeErr = errors.New("connection closed")
-		// cancel must be called after closeErr is set. This ensures interested goroutines waiting on
-		// ctx.Done can read closeErr without holding the conn lock.
-		c.cancel()
-		c.m.Lock()
-		streams := c.streams
-		c.streams = nil
-		c.m.Unlock()
-		for _, str := range streams {
-			str.Reset()
-		}
-		c.pc.Close()
-		c.scope.Done()
-	})
+	c.closeOnce.Do(func() { c.closeWithError(errors.New("connection closed")) })
 	return nil
 }
 
-func (c *connection) closeTimedOut() error {
-	c.closeOnce.Do(func() {
-		c.closeErr = errConnectionTimeout{}
-		// cancel must be called after closeErr is set. This ensures interested goroutines waiting on
-		// ctx.Done can read closeErr without holding the conn lock.
-		c.cancel()
-		c.m.Lock()
-		streams := c.streams
-		c.streams = nil
-		c.m.Unlock()
-		for _, str := range streams {
-			str.closeWithError(errConnectionTimeout{})
+// closeWithError is used to Close the connection when the underlying DTLS connection fails
+func (c *connection) closeWithError(err error) {
+	c.closeErr = err
+	// cancel must be called after closeErr is set. This ensures interested goroutines waiting on
+	// ctx.Done can read closeErr without holding the conn lock.
+	c.cancel()
+	c.pc.Close()
+loop:
+	for {
+		select {
+		case <-c.acceptQueue:
+		default:
+			break loop
 		}
-		c.pc.Close()
-		c.scope.Done()
-	})
-	return nil
+	}
+	c.scope.Done()
 }
 
 func (c *connection) IsClosed() bool {
@@ -176,7 +157,6 @@ func (c *connection) OpenStream(ctx context.Context) (network.MuxedStream, error
 	if c.IsClosed() {
 		return nil, c.closeErr
 	}
-
 	dc, err := c.pc.CreateDataChannel("", nil)
 	if err != nil {
 		return nil, err
@@ -185,12 +165,11 @@ func (c *connection) OpenStream(ctx context.Context) (network.MuxedStream, error
 	if err != nil {
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
-	str := newStream(dc, rwc, func() { c.removeStream(*dc.ID()) })
-	if err := c.addStream(str); err != nil {
-		str.Reset()
-		return nil, err
+	if c.IsClosed() {
+		dc.Close()
+		return nil, c.closeErr
 	}
-	return str, nil
+	return newStream(dc, rwc, nil), nil
 }
 
 func (c *connection) AcceptStream() (network.MuxedStream, error) {
@@ -198,12 +177,11 @@ func (c *connection) AcceptStream() (network.MuxedStream, error) {
 	case <-c.ctx.Done():
 		return nil, c.closeErr
 	case dc := <-c.acceptQueue:
-		str := newStream(dc.channel, dc.stream, func() { c.removeStream(*dc.channel.ID()) })
-		if err := c.addStream(str); err != nil {
-			str.Reset()
-			return nil, err
+		if c.IsClosed() {
+			dc.channel.Close()
+			return nil, c.closeErr
 		}
-		return str, nil
+		return newStream(dc.channel, dc.stream, nil), nil
 	}
 }
 
@@ -215,28 +193,11 @@ func (c *connection) RemoteMultiaddr() ma.Multiaddr { return c.remoteMultiaddr }
 func (c *connection) Scope() network.ConnScope      { return c.scope }
 func (c *connection) Transport() tpt.Transport      { return c.transport }
 
-func (c *connection) addStream(str *stream) error {
-	c.m.Lock()
-	defer c.m.Unlock()
-	if c.IsClosed() {
-		return fmt.Errorf("connection closed: %w", c.closeErr)
-	}
-	if _, ok := c.streams[str.id]; ok {
-		return errors.New("stream ID already exists")
-	}
-	c.streams[str.id] = str
-	return nil
-}
-
-func (c *connection) removeStream(id uint16) {
-	c.m.Lock()
-	defer c.m.Unlock()
-	delete(c.streams, id)
-}
-
 func (c *connection) onConnectionStateChange(state webrtc.PeerConnectionState) {
 	if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
-		c.closeTimedOut()
+		c.closeOnce.Do(func() {
+			c.closeWithError(errConnectionTimeout{})
+		})
 	}
 }
 

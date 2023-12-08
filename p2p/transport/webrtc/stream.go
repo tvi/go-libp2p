@@ -184,14 +184,6 @@ func (s *stream) Reset() error {
 	return closeReadErr
 }
 
-func (s *stream) closeWithError(e error) {
-	defer s.cleanup()
-
-	s.mx.Lock()
-	defer s.mx.Unlock()
-	s.closeErr = e
-}
-
 func (s *stream) SetDeadline(t time.Time) error {
 	_ = s.SetReadDeadline(t)
 	return s.SetWriteDeadline(t)

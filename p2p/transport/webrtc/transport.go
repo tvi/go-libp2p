@@ -514,12 +514,12 @@ func (t *WebRTCTransport) noiseHandshake(ctx context.Context, c *connection, s *
 	}
 	var secureConn sec.SecureConn
 	if inbound {
-		secureConn, err = sessionTransport.SecureOutbound(ctx, netConnWrapper{s, c}, peer)
+		secureConn, err = sessionTransport.SecureOutbound(ctx, netConnWrapper{s}, peer)
 		if err != nil {
 			return nil, fmt.Errorf("failed to secure inbound connection: %w", err)
 		}
 	} else {
-		secureConn, err = sessionTransport.SecureInbound(ctx, netConnWrapper{s, c}, peer)
+		secureConn, err = sessionTransport.SecureInbound(ctx, netConnWrapper{s}, peer)
 		if err != nil {
 			return nil, fmt.Errorf("failed to secure outbound connection: %w", err)
 		}
@@ -529,13 +529,7 @@ func (t *WebRTCTransport) noiseHandshake(ctx context.Context, c *connection, s *
 
 type netConnWrapper struct {
 	*stream
-	*connection
 }
 
 func (netConnWrapper) LocalAddr() net.Addr  { return nil }
 func (netConnWrapper) RemoteAddr() net.Addr { return nil }
-
-func (f netConnWrapper) Close() error {
-	f.connection.Close()
-	return nil
-}
