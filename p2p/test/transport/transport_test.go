@@ -280,6 +280,7 @@ func TestLotsOfDataManyStreams(t *testing.T) {
 
 			sem := make(chan struct{}, parallel)
 			var wg sync.WaitGroup
+			var done atomic.Int32
 			for i := 0; i < totalStreams; i++ {
 				wg.Add(1)
 				sem <- struct{}{}
@@ -302,6 +303,7 @@ func TestLotsOfDataManyStreams(t *testing.T) {
 
 					_, err = s.Read([]byte{0})
 					require.ErrorIs(t, err, io.EOF)
+					fmt.Println("done", done.Add(1))
 				}()
 			}
 
