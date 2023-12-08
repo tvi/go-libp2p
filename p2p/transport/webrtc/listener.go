@@ -222,6 +222,7 @@ func (l *listener) setupConnection(
 		l.transport.peerConnectionTimeouts.Failed,
 		l.transport.peerConnectionTimeouts.Keepalive,
 	)
+	settingEngine.SetReceiveMTU(receiveMTUBytes)
 	settingEngine.DetachDataChannels()
 
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))

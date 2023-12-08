@@ -76,6 +76,7 @@ const (
 // timeout values for the peerconnection
 // https://github.com/pion/webrtc/blob/v3.1.50/settingengine.go#L102-L109
 const (
+	receiveMTUBytes            = 1501
 	DefaultDisconnectedTimeout = 20 * time.Second
 	DefaultFailedTimeout       = 30 * time.Second
 	DefaultKeepaliveTimeout    = 15 * time.Second
@@ -315,10 +316,9 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 	// This is disallowed in the ICE specification. However, implementations
 	// do not strictly follow this, for eg. Chrome gathers TCP loopback candidates.
 	// If you run pion on a system with only the loopback interface UP,
-	// it will not connect to anything. However, if it has any other interface
-	// (even a private one, eg. 192.168.0.0/16), it will gather candidates on it and
-	// will be able to connect to other pion instances on the same interface.
+	// it will not connect to anything.
 	settingEngine.SetIncludeLoopbackCandidate(true)
+	settingEngine.SetReceiveMTU(receiveMTUBytes)
 
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
 
