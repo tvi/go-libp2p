@@ -436,7 +436,7 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 					func() {
 						var didErr bool
 						defer func() {
-							fmt.Println("completed", completedStreams.Add(1))
+							t.Log("completed", completedStreams.Add(1))
 						}()
 						defer func() {
 							// Only the first worker adds more workers
