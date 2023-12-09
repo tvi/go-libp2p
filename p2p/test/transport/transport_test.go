@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -381,9 +380,6 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 	const streamCount = 1024
 	for _, tc := range transportsToTest {
 		t.Run(tc.Name, func(t *testing.T) {
-			if strings.Contains(tc.Name, "WebRTC") {
-				t.Skip("This test potentially exhausts the uint16 WebRTC stream ID space.")
-			}
 			listenerLimits := rcmgr.PartialLimitConfig{
 				PeerDefault: rcmgr.ResourceLimits{
 					Streams:         32,
@@ -439,7 +435,9 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 					// Inline function so we can use defer
 					func() {
 						var didErr bool
-						defer completedStreams.Add(1)
+						defer func() {
+							fmt.Println("completed", completedStreams.Add(1))
+						}()
 						defer func() {
 							// Only the first worker adds more workers
 							if workerIdx == 0 && !didErr && !sawFirstErr.Load() {
