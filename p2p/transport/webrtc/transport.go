@@ -76,7 +76,7 @@ const (
 // timeout values for the peerconnection
 // https://github.com/pion/webrtc/blob/v3.1.50/settingengine.go#L102-L109
 const (
-	receiveMTUBytes            = 1501
+	receiveMTUBytes            = 1500
 	DefaultDisconnectedTimeout = 20 * time.Second
 	DefaultFailedTimeout       = 30 * time.Second
 	DefaultKeepaliveTimeout    = 15 * time.Second
@@ -533,3 +533,7 @@ type netConnWrapper struct {
 
 func (netConnWrapper) LocalAddr() net.Addr  { return nil }
 func (netConnWrapper) RemoteAddr() net.Addr { return nil }
+func (w netConnWrapper) Close() error {
+	w.stream.Reset()
+	return nil
+}

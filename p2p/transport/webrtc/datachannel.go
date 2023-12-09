@@ -11,8 +11,10 @@ import (
 // will be called immediately. Only use after the peerconnection is open.
 // The context should close if the peerconnection underlying the datachannel
 // is closed.
-func getDetachedChannel(ctx context.Context, dc *webrtc.DataChannel) (rwc datachannel.ReadWriteCloser, err error) {
+func getDetachedChannel(ctx context.Context, dc *webrtc.DataChannel) (datachannel.ReadWriteCloser, error) {
 	done := make(chan struct{})
+	var rwc datachannel.ReadWriteCloser
+	var err error
 	dc.OnOpen(func() {
 		defer close(done)
 		rwc, err = dc.Detach()
@@ -21,8 +23,8 @@ func getDetachedChannel(ctx context.Context, dc *webrtc.DataChannel) (rwc datach
 	// callback immediately if the SCTP transport is also connected.
 	select {
 	case <-done:
+		return rwc, err
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	return
 }
