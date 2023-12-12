@@ -42,6 +42,9 @@ const (
 	// is less than or equal to 2 ^ 14, the varint will not be more than
 	// 2 bytes in length.
 	varintOverhead = 2
+	// maxFINACKWait is the maximum amount of time a stream will wait to read
+	// FIN_ACK before closing the data channel
+	maxFINACKWait = 10 * time.Second
 )
 
 type receiveState uint8
@@ -144,7 +147,7 @@ func (s *stream) Close() error {
 	}
 
 	s.mx.Lock()
-	s.controlMessageReaderEndTime = time.Now().Add(10 * time.Second)
+	s.controlMessageReaderEndTime = time.Now().Add(maxFINACKWait)
 	s.mx.Unlock()
 	s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
 	<-s.controlMessageReaderDone
@@ -162,7 +165,7 @@ func (s *stream) AsyncClose(onDone func()) error {
 		return errors.Join(closeWriteErr, closeReadErr)
 	}
 	s.mx.Lock()
-	s.controlMessageReaderEndTime = time.Now().Add(10 * time.Second)
+	s.controlMessageReaderEndTime = time.Now().Add(maxFINACKWait)
 	s.mx.Unlock()
 	s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
 	go func() {

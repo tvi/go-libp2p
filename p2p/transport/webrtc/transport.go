@@ -42,6 +42,7 @@ import (
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
 
+	"github.com/pion/datachannel"
 	pionlogger "github.com/pion/logging"
 	"github.com/pion/webrtc/v3"
 )
@@ -331,7 +332,7 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 	// We need to set negotiated = true for this channel on both
 	// the client and server to avoid DCEP errors.
 	negotiated, id := handshakeChannelNegotiated, handshakeChannelID
-	handshakeChannel, err := pc.CreateDataChannel("", &webrtc.DataChannelInit{
+	rawHandshakeChannel, err := pc.CreateDataChannel("", &webrtc.DataChannelInit{
 		Negotiated: &negotiated,
 		ID:         &id,
 	})
@@ -371,12 +372,12 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 		return nil, errors.New("peerconnection opening timed out")
 	}
 
-	detached, err := getDetachedChannel(ctx, handshakeChannel)
+	detached, err := detachHandshakeDataChannel(ctx, rawHandshakeChannel)
 	if err != nil {
 		return nil, err
 	}
 	// set the local address from the candidate pair
-	cp, err := handshakeChannel.Transport().Transport().ICETransport().GetSelectedCandidatePair()
+	cp, err := rawHandshakeChannel.Transport().Transport().ICETransport().GetSelectedCandidatePair()
 	if cp == nil {
 		return nil, errors.New("ice connection did not have selected candidate pair: nil result")
 	}
@@ -384,7 +385,7 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 		return nil, fmt.Errorf("ice connection did not have selected candidate pair: error: %w", err)
 	}
 
-	s := newStream(handshakeChannel, detached, func() {})
+	channel := newStream(rawHandshakeChannel, detached, func() {})
 	// the local address of the selected candidate pair should be the
 	// local address for the connection, since different datachannels
 	// are multiplexed over the same SCTP connection
@@ -412,13 +413,11 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 		return nil, err
 	}
 
-	remotePubKey, err := t.noiseHandshake(ctx, conn, s, p, remoteHashFunction, false)
+	remotePubKey, err := t.noiseHandshake(ctx, pc, channel, p, remoteHashFunction, false)
 	if err != nil {
-		conn.Close()
 		return nil, err
 	}
 	if t.gater != nil && !t.gater.InterceptSecured(network.DirOutbound, p, conn) {
-		conn.Close()
 		return nil, fmt.Errorf("secured connection gated")
 	}
 	conn.setRemotePublicKey(remotePubKey)
@@ -498,8 +497,8 @@ func (t *WebRTCTransport) generateNoisePrologue(pc *webrtc.PeerConnection, hash 
 	return result, nil
 }
 
-func (t *WebRTCTransport) noiseHandshake(ctx context.Context, c *connection, s *stream, peer peer.ID, hash crypto.Hash, inbound bool) (ic.PubKey, error) {
-	prologue, err := t.generateNoisePrologue(c.pc, hash, inbound)
+func (t *WebRTCTransport) noiseHandshake(ctx context.Context, pc *webrtc.PeerConnection, s *stream, peer peer.ID, hash crypto.Hash, inbound bool) (ic.PubKey, error) {
+	prologue, err := t.generateNoisePrologue(pc, hash, inbound)
 	if err != nil {
 		return nil, fmt.Errorf("generate prologue: %w", err)
 	}
@@ -538,4 +537,23 @@ func (w netConnWrapper) Close() error {
 	// stream in that case rather than gracefully closing
 	w.stream.Reset()
 	return nil
+}
+
+// detachHandshakeDataChannel detaches the handshake data channel
+func detachHandshakeDataChannel(ctx context.Context, dc *webrtc.DataChannel) (datachannel.ReadWriteCloser, error) {
+	done := make(chan struct{})
+	var rwc datachannel.ReadWriteCloser
+	var err error
+	dc.OnOpen(func() {
+		defer close(done)
+		rwc, err = dc.Detach()
+	})
+	// this is safe since for detached datachannels, the peerconnection runs the onOpen
+	// callback immediately if the SCTP transport is also connected.
+	select {
+	case <-done:
+		return rwc, err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

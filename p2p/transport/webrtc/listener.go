@@ -265,15 +265,14 @@ func (l *listener) setupConnection(
 		}
 	}
 
-	rwc, err := getDetachedChannel(ctx, rawDatachannel)
+	rwc, err := detachHandshakeDataChannel(ctx, rawDatachannel)
 	if err != nil {
 		return nil, err
 	}
 
 	localMultiaddrWithoutCerthash, _ := ma.SplitFunc(l.localMultiaddr, func(c ma.Component) bool { return c.Protocol().Code == ma.P_CERTHASH })
 
-	s := newStream(rawDatachannel, rwc, func() {})
-
+	handshakeChannel := newStream(rawDatachannel, rwc, func() {})
 	// The connection is instantiated before performing the Noise handshake. This is
 	// to handle the case where the remote is faster and attempts to initiate a stream
 	// before the ondatachannel callback can be set.
@@ -293,20 +292,17 @@ func (l *listener) setupConnection(
 	}
 
 	// we do not yet know A's peer ID so accept any inbound
-	remotePubKey, err := l.transport.noiseHandshake(ctx, conn, s, "", crypto.SHA256, true)
+	remotePubKey, err := l.transport.noiseHandshake(ctx, pc, handshakeChannel, "", crypto.SHA256, true)
 	if err != nil {
-		conn.Close()
 		return nil, err
 	}
 	remotePeer, err := peer.IDFromPublicKey(remotePubKey)
 	if err != nil {
-		conn.Close()
 		return nil, err
 	}
 
 	// earliest point where we know the remote's peerID
 	if err := scope.SetPeer(remotePeer); err != nil {
-		conn.Close()
 		return nil, err
 	}
 

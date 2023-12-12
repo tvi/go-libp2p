@@ -316,7 +316,6 @@ func TestTransportWebRTC_DialerCanCreateStreamsMultiple(t *testing.T) {
 		require.Equal(t, connectingPeer, lconn.RemotePeer())
 		var wg sync.WaitGroup
 		var doneStreams atomic.Int32
-		var concurrency atomic.Int32
 		for i := 0; i < numListeners; i++ {
 			wg.Add(1)
 			go func() {
@@ -327,13 +326,11 @@ func TestTransportWebRTC_DialerCanCreateStreamsMultiple(t *testing.T) {
 						return
 					}
 					s, err := lconn.AcceptStream()
-					fmt.Println("concurrency", concurrency.Add(1))
 					require.NoError(t, err)
 					n, err := io.Copy(s, s)
 					require.Equal(t, n, int64(size))
 					require.NoError(t, err)
 					s.Close()
-					concurrency.Add(-1)
 				}
 			}()
 		}
@@ -375,7 +372,7 @@ func TestTransportWebRTC_DialerCanCreateStreamsMultiple(t *testing.T) {
 					t.Errorf("bytes not equal: %d %d", len(buf), len(resp))
 				}
 				s.Close()
-				fmt.Println("completed stream: ", cnt.Add(1), s.(*stream).id)
+				t.Log("completed stream: ", cnt.Add(1), s.(*stream).id)
 			}
 		}()
 	}
