@@ -117,7 +117,7 @@ func (s *stream) SetWriteDeadline(t time.Time) error {
 func (s *stream) availableSendSpace() int {
 	buffered := int(s.dataChannel.BufferedAmount())
 	availableSpace := maxBufferedAmount - buffered
-	if availableSpace+maxTotalControlMessageSize < 0 { // this should never happen, but better check
+	if availableSpace+maxTotalControlMessagesSize < 0 { // this should never happen, but better check
 		log.Errorw("data channel buffered more data than the maximum amount", "max", maxBufferedAmount, "buffered", buffered)
 	}
 	return availableSpace

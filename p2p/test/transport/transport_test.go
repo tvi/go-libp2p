@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -380,6 +381,9 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 	const streamCount = 1024
 	for _, tc := range transportsToTest {
 		t.Run(tc.Name, func(t *testing.T) {
+			if strings.Contains(tc.Name, "WebRTC") {
+				t.Skip("Pion doesn't correctly handle large queues of streams.")
+			}
 			listenerLimits := rcmgr.PartialLimitConfig{
 				PeerDefault: rcmgr.ResourceLimits{
 					Streams:         32,
@@ -417,7 +421,6 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 
 			wg := sync.WaitGroup{}
 			errCh := make(chan error, 1)
-			var completedStreams atomic.Int32
 
 			const maxWorkerCount = streamCount
 			workerCount := 4
@@ -435,9 +438,6 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 					// Inline function so we can use defer
 					func() {
 						var didErr bool
-						defer func() {
-							t.Log("completed", completedStreams.Add(1))
-						}()
 						defer func() {
 							// Only the first worker adds more workers
 							if workerIdx == 0 && !didErr && !sawFirstErr.Load() {
