@@ -66,10 +66,10 @@ const (
 type stream struct {
 	mx sync.Mutex
 
-	// readerOnce ensures that only a single goroutine reads from the reader. Read is not threadsafe
+	// readerSem ensures that only a single goroutine reads from the reader. Read is not threadsafe
 	// But we may need to read from reader for control messages from a different goroutine.
-	readerOnce chan struct{}
-	reader     pbio.Reader
+	readerSem chan struct{}
+	reader    pbio.Reader
 
 	// this buffer is limited up to a single message. Reason we need it
 	// is because a reader might read a message midway, and so we need a
@@ -108,9 +108,9 @@ func newStream(
 	onDone func(),
 ) *stream {
 	s := &stream{
-		readerOnce: make(chan struct{}, 1),
-		reader:     pbio.NewDelimitedReader(rwc, maxMessageSize),
-		writer:     pbio.NewDelimitedWriter(rwc),
+		readerSem: make(chan struct{}, 1),
+		reader:    pbio.NewDelimitedReader(rwc, maxMessageSize),
+		writer:    pbio.NewDelimitedWriter(rwc),
 
 		sendStateChanged:     make(chan struct{}, 1),
 		writeDeadlineUpdated: make(chan struct{}, 1),
@@ -262,8 +262,8 @@ func (s *stream) spawnControlMessageReader() {
 		// Unblock any Read call waiting on reader.ReadMsg
 		s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
 		// We have the lock, any waiting reader has exited.
-		s.readerOnce <- struct{}{}
-		<-s.readerOnce
+		s.readerSem <- struct{}{}
+		<-s.readerSem
 		// From this point onwards only this goroutine can do reader.ReadMsg
 
 		s.mx.Lock()

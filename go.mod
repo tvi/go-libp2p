@@ -130,5 +130,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 )
-
-replace github.com/pion/webrtc/v3 => github.com/sukunrt/webrtc/v3 v3.0.0-20231209135244-1f39522456ed
