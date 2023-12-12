@@ -280,7 +280,6 @@ func TestLotsOfDataManyStreams(t *testing.T) {
 
 			sem := make(chan struct{}, parallel)
 			var wg sync.WaitGroup
-			var done atomic.Int32
 			for i := 0; i < totalStreams; i++ {
 				wg.Add(1)
 				sem <- struct{}{}
@@ -303,7 +302,6 @@ func TestLotsOfDataManyStreams(t *testing.T) {
 
 					_, err = s.Read([]byte{0})
 					require.ErrorIs(t, err, io.EOF)
-					fmt.Println("done", done.Add(1))
 				}()
 			}
 
@@ -382,7 +380,7 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 	for _, tc := range transportsToTest {
 		t.Run(tc.Name, func(t *testing.T) {
 			if strings.Contains(tc.Name, "WebRTC") {
-				t.Skip("Pion doesn't correctly handle large queues of streams.")
+				t.Skip("This test potentially exhausts the uint16 WebRTC stream ID space.")
 			}
 			listenerLimits := rcmgr.PartialLimitConfig{
 				PeerDefault: rcmgr.ResourceLimits{
@@ -421,6 +419,7 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 
 			wg := sync.WaitGroup{}
 			errCh := make(chan error, 1)
+			var completedStreams atomic.Int32
 
 			const maxWorkerCount = streamCount
 			workerCount := 4
@@ -438,6 +437,7 @@ func TestMoreStreamsThanOurLimits(t *testing.T) {
 					// Inline function so we can use defer
 					func() {
 						var didErr bool
+						defer completedStreams.Add(1)
 						defer func() {
 							// Only the first worker adds more workers
 							if workerIdx == 0 && !didErr && !sawFirstErr.Load() {

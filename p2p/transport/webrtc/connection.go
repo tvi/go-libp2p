@@ -92,9 +92,9 @@ func newConnection(
 		remoteMultiaddr: remoteMultiaddr,
 		ctx:             ctx,
 		cancel:          cancel,
+		streams:         make(map[uint16]*stream),
 
 		acceptQueue: make(chan dataChannel, maxAcceptQueueLen),
-		streams:     make(map[uint16]*stream),
 	}
 	switch direction {
 	case network.DirInbound:
@@ -179,22 +179,6 @@ func (c *connection) OpenStream(ctx context.Context) (network.MuxedStream, error
 	return str, nil
 }
 
-func (c *connection) addStream(str *stream) error {
-	c.m.Lock()
-	defer c.m.Unlock()
-	if _, ok := c.streams[str.id]; ok {
-		return errors.New("stream ID already exists")
-	}
-	c.streams[str.id] = str
-	return nil
-}
-
-func (c *connection) removeStream(id uint16) {
-	c.m.Lock()
-	defer c.m.Unlock()
-	delete(c.streams, id)
-}
-
 func (c *connection) AcceptStream() (network.MuxedStream, error) {
 	select {
 	case <-c.ctx.Done():
@@ -216,6 +200,22 @@ func (c *connection) LocalMultiaddr() ma.Multiaddr  { return c.localMultiaddr }
 func (c *connection) RemoteMultiaddr() ma.Multiaddr { return c.remoteMultiaddr }
 func (c *connection) Scope() network.ConnScope      { return c.scope }
 func (c *connection) Transport() tpt.Transport      { return c.transport }
+
+func (c *connection) addStream(str *stream) error {
+	c.m.Lock()
+	defer c.m.Unlock()
+	if _, ok := c.streams[str.id]; ok {
+		return errors.New("stream ID already exists")
+	}
+	c.streams[str.id] = str
+	return nil
+}
+
+func (c *connection) removeStream(id uint16) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	delete(c.streams, id)
+}
 
 func (c *connection) onConnectionStateChange(state webrtc.PeerConnectionState) {
 	if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
