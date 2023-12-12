@@ -9,8 +9,8 @@ import (
 )
 
 func (s *stream) Read(b []byte) (int, error) {
-	s.readerOnce <- struct{}{}
-	defer func() { <-s.readerOnce }()
+	s.readerSem <- struct{}{}
+	defer func() { <-s.readerSem }()
 
 	s.mx.Lock()
 	defer s.mx.Unlock()

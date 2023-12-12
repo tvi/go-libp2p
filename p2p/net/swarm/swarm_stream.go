@@ -75,10 +75,14 @@ func (s *Stream) Write(p []byte) (int, error) {
 	return n, err
 }
 
+type asyncCloser interface {
+	AsyncClose(onDone func()) error
+}
+
 // Close closes the stream, closing both ends and freeing all associated
 // resources.
 func (s *Stream) Close() error {
-	if as, ok := s.stream.(network.AsyncCloser); ok {
+	if as, ok := s.stream.(asyncCloser); ok {
 		err := as.AsyncClose(func() {
 			s.closeAndRemoveStream()
 		})

@@ -61,13 +61,6 @@ type MuxedStream interface {
 	SetWriteDeadline(time.Time) error
 }
 
-// AsyncCloser is implemented by streams that need to do expensive operations on close before
-// releasing the resources. Closing the stream async avoids blocking the calling goroutine.
-type AsyncCloser interface {
-	// AsyncClose closes the stream and executes onDone after the stream is closed
-	AsyncClose(onDone func()) error
-}
-
 // MuxedConn represents a connection to a remote peer that has been
 // extended to support stream multiplexing.
 //
