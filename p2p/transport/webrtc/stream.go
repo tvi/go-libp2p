@@ -21,9 +21,9 @@ const (
 	// We can change this value in the SettingEngine before creating the peerconnection.
 	// https://github.com/pion/webrtc/blob/v3.1.49/sctptransport.go#L341
 	maxBufferedAmount = 2 * maxMessageSize
-	// maxTotalControlMessageSize is the maximum of the total size of all control messages we will
+	// maxTotalControlMessagesSize is the maximum total size of all control messages we will
 	// write on this stream
-	maxTotalControlMessageSize = 500
+	maxTotalControlMessagesSize = 500
 	// bufferedAmountLowThreshold and maxBufferedAmount are bound
 	// to a stream but congestion control is done on the whole
 	// SCTP association. This means that a single stream can monopolize

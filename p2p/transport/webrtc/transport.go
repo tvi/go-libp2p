@@ -534,6 +534,8 @@ type netConnWrapper struct {
 func (netConnWrapper) LocalAddr() net.Addr  { return nil }
 func (netConnWrapper) RemoteAddr() net.Addr { return nil }
 func (w netConnWrapper) Close() error {
+	// Close called while running the security handshake is an error and we should Reset the
+	// stream in that case rather than gracefully closing
 	w.stream.Reset()
 	return nil
 }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	ic "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -53,6 +55,10 @@ type connection struct {
 	remoteKey       ic.PubKey
 	remoteMultiaddr ma.Multiaddr
 
+	m            sync.Mutex
+	streams      map[uint16]*stream
+	nextStreamID atomic.Int32
+
 	acceptQueue chan dataChannel
 
 	ctx    context.Context
@@ -88,13 +94,18 @@ func newConnection(
 		cancel:          cancel,
 
 		acceptQueue: make(chan dataChannel, maxAcceptQueueLen),
+		streams:     make(map[uint16]*stream),
+	}
+	switch direction {
+	case network.DirInbound:
+		c.nextStreamID.Store(1)
+	case network.DirOutbound:
+		// stream ID 0 is used for the Noise handshake stream
+		c.nextStreamID.Store(2)
 	}
 
 	pc.OnConnectionStateChange(c.onConnectionStateChange)
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
-		if c.IsClosed() {
-			return
-		}
 		dc.OnOpen(func() {
 			rwc, err := dc.Detach()
 			if err != nil {
@@ -132,44 +143,56 @@ func (c *connection) closeWithError(err error) {
 	// cancel must be called after closeErr is set. This ensures interested goroutines waiting on
 	// ctx.Done can read closeErr without holding the conn lock.
 	c.cancel()
+	// closing peerconnection will close the datachannels associated with the streams
 	c.pc.Close()
-loop:
-	for {
-		select {
-		case <-c.acceptQueue:
-		default:
-			break loop
-		}
-	}
 	c.scope.Done()
 }
 
 func (c *connection) IsClosed() bool {
-	select {
-	case <-c.ctx.Done():
-		return true
-	default:
-		return false
-	}
+	return c.ctx.Err() != nil
 }
 
 func (c *connection) OpenStream(ctx context.Context) (network.MuxedStream, error) {
 	if c.IsClosed() {
 		return nil, c.closeErr
 	}
-	dc, err := c.pc.CreateDataChannel("", nil)
+
+	id := c.nextStreamID.Add(2) - 2
+	if id > math.MaxUint16 {
+		return nil, errors.New("exhausted stream ID space")
+	}
+	streamID := uint16(id)
+	dc, err := c.pc.CreateDataChannel("", &webrtc.DataChannelInit{ID: &streamID})
 	if err != nil {
 		return nil, err
 	}
 	rwc, err := c.detachChannel(ctx, dc)
 	if err != nil {
-		return nil, fmt.Errorf("open stream: %w", err)
-	}
-	if c.IsClosed() {
 		dc.Close()
-		return nil, c.closeErr
+		return nil, fmt.Errorf("detach channel failed for stream(%d): %w", streamID, err)
 	}
-	return newStream(dc, rwc, nil), nil
+	str := newStream(dc, rwc, func() { c.removeStream(streamID) })
+	if err := c.addStream(str); err != nil {
+		str.Reset()
+		return nil, fmt.Errorf("failed to add stream(%d) to connection: %w", streamID, err)
+	}
+	return str, nil
+}
+
+func (c *connection) addStream(str *stream) error {
+	c.m.Lock()
+	defer c.m.Unlock()
+	if _, ok := c.streams[str.id]; ok {
+		return errors.New("stream ID already exists")
+	}
+	c.streams[str.id] = str
+	return nil
+}
+
+func (c *connection) removeStream(id uint16) {
+	c.m.Lock()
+	defer c.m.Unlock()
+	delete(c.streams, id)
 }
 
 func (c *connection) AcceptStream() (network.MuxedStream, error) {
@@ -177,11 +200,12 @@ func (c *connection) AcceptStream() (network.MuxedStream, error) {
 	case <-c.ctx.Done():
 		return nil, c.closeErr
 	case dc := <-c.acceptQueue:
-		if c.IsClosed() {
-			dc.channel.Close()
-			return nil, c.closeErr
+		str := newStream(dc.channel, dc.stream, func() { c.removeStream(*dc.channel.ID()) })
+		if err := c.addStream(str); err != nil {
+			str.Reset()
+			return nil, err
 		}
-		return newStream(dc.channel, dc.stream, nil), nil
+		return str, nil
 	}
 }
 
@@ -218,8 +242,11 @@ func (c *connection) onConnectionStateChange(state webrtc.PeerConnectionState) {
 // This was desired because it was not feasible to introduce backpressure
 // with the OnMessage callbacks. The tradeoff is a change in the semantics of
 // the OnOpen callback, and having to force close Read locally.
-func (c *connection) detachChannel(ctx context.Context, dc *webrtc.DataChannel) (rwc datachannel.ReadWriteCloser, err error) {
+func (c *connection) detachChannel(ctx context.Context, dc *webrtc.DataChannel) (datachannel.ReadWriteCloser, error) {
 	done := make(chan struct{})
+
+	var rwc datachannel.ReadWriteCloser
+	var err error
 	// OnOpen will return immediately for detached datachannels
 	// refer: https://github.com/pion/webrtc/blob/7ab3174640b3ce15abebc2516a2ca3939b5f105f/datachannel.go#L278-L282
 	dc.OnOpen(func() {
@@ -233,8 +260,8 @@ func (c *connection) detachChannel(ctx context.Context, dc *webrtc.DataChannel) 
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-done:
+		return rwc, err
 	}
-	return
 }
 
 // A note on these setters and why they are needed:
