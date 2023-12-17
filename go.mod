@@ -130,3 +130,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 )
+
+replace github.com/pion/sctp => github.com/sukunrt/sctp v0.0.0-20231217055423-1ff4ca21cc89

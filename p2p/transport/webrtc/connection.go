@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	ic "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -176,6 +177,7 @@ func (c *connection) OpenStream(ctx context.Context) (network.MuxedStream, error
 		str.Reset()
 		return nil, fmt.Errorf("failed to add stream(%d) to connection: %w", streamID, err)
 	}
+	fmt.Println(time.Now(), "stream opened", str.id)
 	return str, nil
 }
 
@@ -189,6 +191,7 @@ func (c *connection) AcceptStream() (network.MuxedStream, error) {
 			str.Reset()
 			return nil, err
 		}
+		fmt.Println(time.Now(), "stream accepted", str.id)
 		return str, nil
 	}
 }
