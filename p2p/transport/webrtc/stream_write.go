@@ -127,8 +127,9 @@ func (s *stream) cancelWrite() error {
 	s.mx.Lock()
 	defer s.mx.Unlock()
 
-	// Don't wait for FIN_ACK on reset
-	if s.sendState != sendStateSending && s.sendState != sendStateDataSent {
+	// There's no need to reset the write half if the write half has been closed
+	// successfully or has been reset previously
+	if s.sendState == sendStateDataReceived || s.sendState == sendStateReset {
 		return nil
 	}
 	s.sendState = sendStateReset

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/p2p/transport/webrtc/pb"
+	"github.com/libp2p/go-msgio/pbio"
 
 	"github.com/libp2p/go-libp2p/core/network"
 
@@ -33,13 +34,13 @@ func getDetachedDataChannels(t *testing.T) (detachedChan, detachedChan) {
 	offerPC, err := api.NewPeerConnection(webrtc.Configuration{})
 	require.NoError(t, err)
 	t.Cleanup(func() { offerPC.Close() })
-	offerRWCChan := make(chan datachannel.ReadWriteCloser, 1)
+	offerRWCChan := make(chan detachedChan, 1)
 	offerDC, err := offerPC.CreateDataChannel("data", nil)
 	require.NoError(t, err)
 	offerDC.OnOpen(func() {
 		rwc, err := offerDC.Detach()
 		require.NoError(t, err)
-		offerRWCChan <- rwc
+		offerRWCChan <- detachedChan{rwc: rwc, dc: offerDC}
 	})
 
 	answerPC, err := api.NewPeerConnection(webrtc.Configuration{})
@@ -94,7 +95,7 @@ func getDetachedDataChannels(t *testing.T) (detachedChan, detachedChan) {
 	require.NoError(t, offerPC.SetRemoteDescription(answer))
 	require.NoError(t, answerPC.SetLocalDescription(answer))
 
-	return <-answerChan, detachedChan{rwc: <-offerRWCChan, dc: offerDC}
+	return <-answerChan, <-offerRWCChan
 }
 
 func TestStreamSimpleReadWriteClose(t *testing.T) {
@@ -138,10 +139,10 @@ func TestStreamSimpleReadWriteClose(t *testing.T) {
 	// stream is only cleaned up on calling Close or AsyncClose or Reset
 	clientStr.AsyncClose(nil)
 	serverStr.AsyncClose(nil)
-	require.Eventually(t, func() bool { return clientDone.Load() }, 10*time.Second, 100*time.Millisecond)
+	require.Eventually(t, func() bool { return clientDone.Load() }, 5*time.Second, 100*time.Millisecond)
 	// Need to call Close for cleanup. Otherwise the FIN_ACK is never read
 	require.NoError(t, serverStr.Close())
-	require.Eventually(t, func() bool { return serverDone.Load() }, 10*time.Second, 100*time.Millisecond)
+	require.Eventually(t, func() bool { return serverDone.Load() }, 5*time.Second, 100*time.Millisecond)
 }
 
 func TestStreamPartialReads(t *testing.T) {
@@ -377,6 +378,8 @@ func TestStreamCloseAfterFINACK(t *testing.T) {
 	}
 }
 
+// TestStreamFinAckAfterStopSending tests that FIN_ACK is sent even after the write half
+// of the stream is closed.
 func TestStreamFinAckAfterStopSending(t *testing.T) {
 	client, server := getDetachedDataChannels(t)
 
@@ -399,8 +402,8 @@ func TestStreamFinAckAfterStopSending(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 	}
 
-	// serverStr has write half of the stream closed but the read half should
-	// respond correctly
+	// serverStr has write half closed and read half open
+	// serverStr should still send FIN_ACK
 	b := make([]byte, 24)
 	_, err := serverStr.Read(b)
 	require.NoError(t, err)
@@ -415,7 +418,7 @@ func TestStreamFinAckAfterStopSending(t *testing.T) {
 func TestStreamConcurrentClose(t *testing.T) {
 	client, server := getDetachedDataChannels(t)
 
-	start := make(chan bool, 1)
+	start := make(chan bool, 2)
 	done := make(chan bool, 2)
 	clientStr := newStream(client.dc, client.rwc, func() { done <- true })
 	serverStr := newStream(server.dc, server.rwc, func() { done <- true })
@@ -462,4 +465,62 @@ func TestStreamResetAfterAsyncClose(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatalf("Reset should run callback immediately")
 	}
+}
+
+func TestStreamDataChannelCloseOnFINACK(t *testing.T) {
+	client, server := getDetachedDataChannels(t)
+
+	done := make(chan bool, 1)
+	clientStr := newStream(client.dc, client.rwc, func() { done <- true })
+
+	clientStr.AsyncClose(nil)
+
+	select {
+	case <-done:
+		t.Fatalf("AsyncClose shouldn't run cleanup immediately")
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	serverWriter := pbio.NewDelimitedWriter(server.rwc)
+	err := serverWriter.WriteMsg(&pb.Message{Flag: pb.Message_FIN_ACK.Enum()})
+	require.NoError(t, err)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Callback should be run on reading FIN_ACK")
+	}
+	b := make([]byte, 100)
+	N := 0
+	for {
+		n, err := server.rwc.Read(b)
+		N += n
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+	}
+	require.Less(t, N, 10)
+}
+
+func TestStreamChunking(t *testing.T) {
+	client, server := getDetachedDataChannels(t)
+
+	clientStr := newStream(client.dc, client.rwc, func() {})
+	serverStr := newStream(server.dc, server.rwc, func() {})
+
+	const N = (16 << 10) + 1000
+	go func() {
+		data := make([]byte, N)
+		_, err := clientStr.Write(data)
+		require.NoError(t, err)
+	}()
+
+	data := make([]byte, N)
+	n, err := serverStr.Read(data)
+	require.NoError(t, err)
+	require.LessOrEqual(t, n, 16<<10)
+
+	nn, err := serverStr.Read(data)
+	require.NoError(t, err)
+	require.Equal(t, nn+n, N)
 }

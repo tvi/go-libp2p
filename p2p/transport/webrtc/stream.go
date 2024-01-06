@@ -94,7 +94,6 @@ type stream struct {
 	// SetReadDeadline
 	// See: https://github.com/pion/sctp/pull/290
 	controlMessageReaderEndTime time.Time
-	controlMessageReaderStarted chan struct{}
 	controlMessageReaderDone    chan struct{}
 
 	onDone      func()
@@ -119,8 +118,7 @@ func newStream(
 		writeDeadlineUpdated: make(chan struct{}, 1),
 		writeAvailable:       make(chan struct{}, 1),
 
-		controlMessageReaderStarted: make(chan struct{}),
-		controlMessageReaderDone:    make(chan struct{}),
+		controlMessageReaderDone: make(chan struct{}),
 
 		id:          *channel.ID(),
 		dataChannel: rwc.(*datachannel.DataChannel),
@@ -168,6 +166,7 @@ func (s *stream) AsyncClose(onDone func()) error {
 	s.controlMessageReaderEndTime = time.Now().Add(maxFINACKWait)
 	s.mx.Unlock()
 	s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
+
 	go func() {
 		<-s.controlMessageReaderDone
 		s.cleanup()
@@ -253,21 +252,23 @@ func (s *stream) spawnControlMessageReader() {
 
 		setDeadline := func() bool {
 			s.mx.Lock()
+			defer s.mx.Unlock()
 			if s.controlMessageReaderEndTime.IsZero() || time.Now().Before(s.controlMessageReaderEndTime) {
 				s.SetReadDeadline(s.controlMessageReaderEndTime)
-				s.mx.Unlock()
 				return true
 			}
-			s.mx.Unlock()
 			return false
 		}
 
 		// Unblock any Read call waiting on reader.ReadMsg
 		s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
-		// We have the lock, any waiting reader has exited.
 		s.readerSem <- struct{}{}
+		// We have the lock any readers blocked on reader.ReadMsg have exited.
+		// From this point onwards only this goroutine will do reader.ReadMsg.
+
+		// Release the semaphore because calls to stream.Read will return immediately
+		// since the read half of the stream is closed.
 		<-s.readerSem
-		// From this point onwards only this goroutine can do reader.ReadMsg
 
 		s.mx.Lock()
 		if s.nextMessage != nil {
@@ -282,6 +283,9 @@ func (s *stream) spawnControlMessageReader() {
 				return
 			}
 			if err := s.reader.ReadMsg(&msg); err != nil {
+				// We have to manually manage deadline exceeded errors since pion/sctp can
+				// return deadline exceeded error for cancelled deadlines
+				// see: https://github.com/pion/sctp/pull/290/files
 				if errors.Is(err, os.ErrDeadlineExceeded) {
 					continue
 				}
