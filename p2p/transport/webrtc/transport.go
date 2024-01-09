@@ -77,7 +77,6 @@ const (
 // timeout values for the peerconnection
 // https://github.com/pion/webrtc/blob/v3.1.50/settingengine.go#L102-L109
 const (
-	receiveMTUBytes            = 1500
 	DefaultDisconnectedTimeout = 20 * time.Second
 	DefaultFailedTimeout       = 30 * time.Second
 	DefaultKeepaliveTimeout    = 15 * time.Second
@@ -319,7 +318,6 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 	// If you run pion on a system with only the loopback interface UP,
 	// it will not connect to anything.
 	settingEngine.SetIncludeLoopbackCandidate(true)
-	settingEngine.SetReceiveMTU(receiveMTUBytes)
 
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
 
