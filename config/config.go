@@ -315,6 +315,10 @@ func (cfg *Config) NewNode() (host.Host, error) {
 		rcmgr.MustRegisterWith(cfg.PrometheusRegisterer)
 	}
 
+	if !cfg.Relay && cfg.EnableRelayService {
+		return nil, errors.New("invalid options: cannot enable relay service without relay transport")
+	}
+
 	h, err := bhost.NewHost(swrm, &bhost.HostOpts{
 		EventBus:             eventBus,
 		ConnManager:          cfg.ConnManager,

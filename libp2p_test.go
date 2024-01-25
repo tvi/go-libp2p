@@ -356,3 +356,20 @@ func TestTransportCustomAddressWebTransportDoesNotStall(t *testing.T) {
 	// We did not add the certhash to the multiaddr
 	require.Equal(t, addrs[0], customAddr)
 }
+
+func TestNewHostRelayServiceOpt(t *testing.T) {
+	h, err := New(
+		EnableRelay(),
+		EnableRelayService(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	h.Close()
+
+	h, err = New(
+		DisableRelay(),
+		EnableRelayService(),
+	)
+	require.Error(t, err)
+	require.Nil(t, h)
+}
