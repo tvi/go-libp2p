@@ -9,8 +9,8 @@ import (
 )
 
 func (s *stream) Read(b []byte) (int, error) {
-	s.readerSem <- struct{}{}
-	defer func() { <-s.readerSem }()
+	s.readerMx.Lock()
+	defer s.readerMx.Unlock()
 
 	s.mx.Lock()
 	defer s.mx.Unlock()
@@ -93,6 +93,6 @@ func (s *stream) CloseRead() error {
 		err = s.writer.WriteMsg(&pb.Message{Flag: pb.Message_STOP_SENDING.Enum()})
 		s.receiveState = receiveStateReset
 	}
-	s.controlMessageReaderOnce.Do(s.spawnControlMessageReader)
+	s.spawnControlMessageReader()
 	return err
 }

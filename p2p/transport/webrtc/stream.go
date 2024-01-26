@@ -69,10 +69,10 @@ const (
 type stream struct {
 	mx sync.Mutex
 
-	// readerSem ensures that only a single goroutine reads from the reader. Read is not threadsafe
+	// readerMx ensures that only a single goroutine reads from the reader. Read is not threadsafe
 	// But we may need to read from reader for control messages from a different goroutine.
-	readerSem chan struct{}
-	reader    pbio.Reader
+	readerMx sync.Mutex
+	reader   pbio.Reader
 
 	// this buffer is limited up to a single message. Reason we need it
 	// is because a reader might read a message midway, and so we need a
@@ -94,7 +94,7 @@ type stream struct {
 	// SetReadDeadline
 	// See: https://github.com/pion/sctp/pull/290
 	controlMessageReaderEndTime time.Time
-	controlMessageReaderDone    chan struct{}
+	controlMessageReaderDone    sync.WaitGroup
 
 	onDone      func()
 	id          uint16 // for logging purposes
@@ -110,21 +110,21 @@ func newStream(
 	onDone func(),
 ) *stream {
 	s := &stream{
-		readerSem: make(chan struct{}, 1),
-		reader:    pbio.NewDelimitedReader(rwc, maxMessageSize),
-		writer:    pbio.NewDelimitedWriter(rwc),
+		reader: pbio.NewDelimitedReader(rwc, maxMessageSize),
+		writer: pbio.NewDelimitedWriter(rwc),
 
 		sendStateChanged:     make(chan struct{}, 1),
 		writeDeadlineUpdated: make(chan struct{}, 1),
 		writeAvailable:       make(chan struct{}, 1),
 
-		controlMessageReaderDone: make(chan struct{}),
+		controlMessageReaderDone: sync.WaitGroup{},
 
 		id:          *channel.ID(),
 		dataChannel: rwc.(*datachannel.DataChannel),
 		onDone:      onDone,
 	}
-
+	// released when the controlMessageReader goroutine exits
+	s.controlMessageReaderDone.Add(1)
 	channel.SetBufferedAmountLowThreshold(bufferedAmountLowThreshold)
 	channel.OnBufferedAmountLow(func() {
 		select {
@@ -148,7 +148,7 @@ func (s *stream) Close() error {
 	s.controlMessageReaderEndTime = time.Now().Add(maxFINACKWait)
 	s.mx.Unlock()
 	s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
-	<-s.controlMessageReaderDone
+	s.controlMessageReaderDone.Wait()
 	return nil
 }
 
@@ -168,7 +168,7 @@ func (s *stream) AsyncClose(onDone func()) error {
 	s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
 
 	go func() {
-		<-s.controlMessageReaderDone
+		s.controlMessageReaderDone.Wait()
 		s.cleanup()
 		if onDone != nil {
 			onDone()
@@ -226,76 +226,72 @@ func (s *stream) processIncomingFlag(flag *pb.Message_Flag) {
 			// Remote has finished writing all the data It'll stop waiting for the
 			// FIN_ACK eventually or will be notified when we close the datachannel
 		}
-		s.controlMessageReaderOnce.Do(s.spawnControlMessageReader)
+		s.spawnControlMessageReader()
 	case pb.Message_RESET:
 		if s.receiveState == receiveStateReceiving {
 			s.receiveState = receiveStateReset
 		}
-		s.controlMessageReaderOnce.Do(s.spawnControlMessageReader)
+		s.spawnControlMessageReader()
 	}
 }
 
 // spawnControlMessageReader is used for processing control messages after the reader is closed.
 func (s *stream) spawnControlMessageReader() {
+	s.controlMessageReaderOnce.Do(func() {
+		// Spawn a goroutine to ensure that we're not holding any locks
+		go func() {
+			defer s.controlMessageReaderDone.Done()
+			// cleanup the sctp deadline timer goroutine
+			defer s.SetReadDeadline(time.Time{})
 
-	// Spawn a goroutine to ensure that we're not holding any locks
-	go func() {
-		defer close(s.controlMessageReaderDone)
-		// cleanup the sctp deadline timer goroutine
-		defer s.SetReadDeadline(time.Time{})
-
-		isSendCompleted := func() bool {
-			s.mx.Lock()
-			defer s.mx.Unlock()
-			return s.sendState == sendStateDataReceived || s.sendState == sendStateReset
-		}
-
-		setDeadline := func() bool {
-			s.mx.Lock()
-			defer s.mx.Unlock()
-			if s.controlMessageReaderEndTime.IsZero() || time.Now().Before(s.controlMessageReaderEndTime) {
-				s.SetReadDeadline(s.controlMessageReaderEndTime)
-				return true
-			}
-			return false
-		}
-
-		// Unblock any Read call waiting on reader.ReadMsg
-		s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
-		s.readerSem <- struct{}{}
-		// We have the lock any readers blocked on reader.ReadMsg have exited.
-		// From this point onwards only this goroutine will do reader.ReadMsg.
-
-		// Release the semaphore because calls to stream.Read will return immediately
-		// since the read half of the stream is closed.
-		<-s.readerSem
-
-		s.mx.Lock()
-		if s.nextMessage != nil {
-			s.processIncomingFlag(s.nextMessage.Flag)
-			s.nextMessage = nil
-		}
-		s.mx.Unlock()
-
-		for !isSendCompleted() {
-			var msg pb.Message
-			if !setDeadline() {
-				return
-			}
-			if err := s.reader.ReadMsg(&msg); err != nil {
-				// We have to manually manage deadline exceeded errors since pion/sctp can
-				// return deadline exceeded error for cancelled deadlines
-				// see: https://github.com/pion/sctp/pull/290/files
-				if errors.Is(err, os.ErrDeadlineExceeded) {
-					continue
+			setDeadline := func() bool {
+				if s.controlMessageReaderEndTime.IsZero() || time.Now().Before(s.controlMessageReaderEndTime) {
+					s.SetReadDeadline(s.controlMessageReaderEndTime)
+					return true
 				}
-				return
+				return false
 			}
+
+			// Unblock any Read call waiting on reader.ReadMsg
+			s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
+
+			s.readerMx.Lock()
+			// We have the lock any readers blocked on reader.ReadMsg have exited.
+			// From this point onwards only this goroutine will do reader.ReadMsg.
+
+			//lint:ignore SA2001 we just want to ensure any exising readers have exited.
+			// Read calls from this point onwards will exit immediately on checking
+			// s.readState
+			s.readerMx.Unlock()
+
 			s.mx.Lock()
-			s.processIncomingFlag(msg.Flag)
-			s.mx.Unlock()
-		}
-	}()
+			defer s.mx.Unlock()
+
+			if s.nextMessage != nil {
+				s.processIncomingFlag(s.nextMessage.Flag)
+				s.nextMessage = nil
+			}
+			for s.sendState != sendStateDataReceived && s.sendState != sendStateReset {
+				var msg pb.Message
+				if !setDeadline() {
+					return
+				}
+				s.mx.Unlock()
+				if err := s.reader.ReadMsg(&msg); err != nil {
+					s.mx.Lock()
+					// We have to manually manage deadline exceeded errors since pion/sctp can
+					// return deadline exceeded error for cancelled deadlines
+					// see: https://github.com/pion/sctp/pull/290/files
+					if errors.Is(err, os.ErrDeadlineExceeded) {
+						continue
+					}
+					return
+				}
+				s.mx.Lock()
+				s.processIncomingFlag(msg.Flag)
+			}
+		}()
+	})
 }
 
 func (s *stream) cleanup() {
