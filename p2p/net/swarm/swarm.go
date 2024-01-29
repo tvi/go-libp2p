@@ -350,6 +350,7 @@ func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn,
 	}
 	stat.Direction = dir
 	stat.Opened = time.Now()
+	isTransient := stat.Transient
 
 	// Wrap and register the connection.
 	c := &Conn{
@@ -389,8 +390,9 @@ func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn,
 		return nil, ErrSwarmClosed
 	}
 
+	oldState := s.connectednessUnlocked(p)
+
 	c.streams.m = make(map[*Stream]struct{})
-	isFirstConnection := len(s.conns.m[p]) == 0
 	s.conns.m[p] = append(s.conns.m[p], c)
 
 	// Add two swarm refs:
@@ -403,8 +405,12 @@ func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn,
 	c.notifyLk.Lock()
 	s.conns.Unlock()
 
-	// Notify goroutines waiting for a direct connection
-	if !c.Stat().Transient {
+	newState := network.Transient
+	if !isTransient {
+		newState = network.Connected
+
+		// Notify goroutines waiting for a direct connection
+		//
 		// Go routines interested in waiting for direct connection first acquire this lock
 		// and then acquire s.conns.RLock. Do not acquire this lock before conns.Unlock to
 		// prevent deadlock.
@@ -418,10 +424,10 @@ func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn,
 
 	// Emit event after releasing `s.conns` lock so that a consumer can still
 	// use swarm methods that need the `s.conns` lock.
-	if isFirstConnection {
+	if oldState != newState {
 		s.emitter.Emit(event.EvtPeerConnectednessChanged{
 			Peer:          p,
-			Connectedness: network.Connected,
+			Connectedness: newState,
 		})
 	}
 
@@ -652,10 +658,30 @@ func isDirectConn(c *Conn) bool {
 // To check if we have an open connection, use `s.Connectedness(p) ==
 // network.Connected`.
 func (s *Swarm) Connectedness(p peer.ID) network.Connectedness {
-	if s.bestConnToPeer(p) != nil {
-		return network.Connected
+	s.conns.RLock()
+	defer s.conns.RUnlock()
+
+	return s.connectednessUnlocked(p)
+}
+
+func (s *Swarm) connectednessUnlocked(p peer.ID) network.Connectedness {
+	var haveTransient bool
+	for _, c := range s.conns.m[p] {
+		if c.conn.IsClosed() {
+			// We *will* garbage collect this soon anyways.
+			continue
+		}
+		if c.Stat().Transient {
+			haveTransient = true
+		} else {
+			return network.Connected
+		}
 	}
-	return network.NotConnected
+	if haveTransient {
+		return network.Transient
+	} else {
+		return network.NotConnected
+	}
 }
 
 // Conns returns a slice of all connections.

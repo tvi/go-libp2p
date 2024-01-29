@@ -61,10 +61,13 @@ const (
 	// CannotConnect means recently attempted connecting but failed to connect.
 	// (should signal "made effort, failed")
 	CannotConnect
+
+	// Transient means we have a transient connection to the peer, but aren't fully connected.
+	Transient
 )
 
 func (c Connectedness) String() string {
-	str := [...]string{"NotConnected", "Connected", "CanConnect", "CannotConnect"}
+	str := [...]string{"NotConnected", "Connected", "CanConnect", "CannotConnect", "Transient"}
 	if c < 0 || int(c) >= len(str) {
 		return unrecognized
 	}
