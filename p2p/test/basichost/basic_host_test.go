@@ -3,18 +3,22 @@ package basichost
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	"github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
+	libp2pwebrtc "github.com/libp2p/go-libp2p/p2p/transport/webrtc"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/rand"
 )
 
 func TestNoStreamOverTransientConnection(t *testing.T) {
@@ -157,4 +161,115 @@ func TestNewStreamTransientConnection(t *testing.T) {
 	}()
 	<-done
 	<-done
+}
+
+func BenchmarkQUICStreams(b *testing.B) {
+	h1, err := libp2p.New(
+		libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"),
+		libp2p.ResourceManager(&network.NullResourceManager{}),
+	)
+	require.NoError(b, err)
+
+	h2, err := libp2p.New(
+		libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"),
+		libp2p.ResourceManager(&network.NullResourceManager{}),
+	)
+	require.NoError(b, err)
+
+	data := make([]byte, 1000)
+	for i := 0; i < len(data); i++ {
+		data[i] = byte(i % 256)
+	}
+
+	info := make([]byte, 1000)
+	h2.SetStreamHandler("/test", func(s network.Stream) {
+		for {
+			_, err := s.Read(info)
+			if err != nil {
+				break
+			}
+		}
+		s.Close()
+	})
+	err = h1.Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
+	require.NoError(b, err)
+	for i := 0; i < b.N; i++ {
+		benchConn(h1, h2.ID(), "/test", data)
+	}
+}
+
+func BenchmarkWebRTCStreams(b *testing.B) {
+	data := make([]byte, 1000)
+	for i := 0; i < len(data); i++ {
+		data[i] = byte(i % 256)
+	}
+
+	info := make([]byte, 1000)
+
+	dialers := make([]host.Host, 20)
+	for i := 0; i < len(dialers); i++ {
+		h, err := libp2p.New(
+			libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/webrtc-direct"),
+			libp2p.ResourceManager(&network.NullResourceManager{}),
+			libp2p.Transport(libp2pwebrtc.New),
+		)
+		require.NoError(b, err)
+		dialers[i] = h
+		dialers[i].SetStreamHandler("/test", func(s network.Stream) {
+			for {
+				_, err := s.Read(info)
+				if err != nil {
+					break
+				}
+			}
+			s.Close()
+		})
+	}
+
+	h2, err := libp2p.New(
+		libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/webrtc-direct"),
+		libp2p.ResourceManager(&network.NullResourceManager{}),
+		libp2p.Transport(libp2pwebrtc.New),
+	)
+	require.NoError(b, err)
+
+	h2.SetStreamHandler("/test", func(s network.Stream) {
+		for {
+			_, err := s.Read(info)
+			if err != nil {
+				break
+			}
+		}
+		s.Close()
+	})
+	for i := 0; i < len(dialers); i++ {
+		err = dialers[i].Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()})
+		require.NoError(b, err)
+		for {
+			if h2.Network().Connectedness(dialers[i].ID()) != network.Connected {
+				time.Sleep(100 * time.Millisecond)
+			}
+			break
+		}
+	}
+	for i := 0; i < b.N; i++ {
+		j := i % len(dialers)
+		if rand.Intn(2) == 0 {
+			benchConn(dialers[j], h2.ID(), "/test", data)
+		} else {
+			benchConn(h2, dialers[j].ID(), "/test", data)
+		}
+		runtime.GC()
+	}
+}
+
+func benchConn(h host.Host, p peer.ID, proto string, data []byte) {
+	s, err := h.NewStream(context.Background(), p, "/test")
+	if err != nil {
+		panic(err)
+	}
+	s.Write(data)
+	s.CloseWrite()
+	s.Read(data)
+	s.Close()
 }

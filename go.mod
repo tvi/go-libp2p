@@ -129,3 +129,9 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 )
+
+replace (
+	github.com/pion/datachannel v1.5.5 => ../datachannel
+	github.com/pion/sctp => ../sctp
+	github.com/pion/webrtc/v3 v3.2.23 => ../webrtc
+)
