@@ -125,8 +125,8 @@ func newStream(
 	}
 	// released when the controlMessageReader goroutine exits
 	s.controlMessageReaderDone.Add(1)
-	channel.SetBufferedAmountLowThreshold(bufferedAmountLowThreshold)
-	channel.OnBufferedAmountLow(func() {
+	s.dataChannel.SetBufferedAmountLowThreshold(bufferedAmountLowThreshold)
+	s.dataChannel.OnBufferedAmountLow(func() {
 		select {
 		case s.writeAvailable <- struct{}{}:
 		default:
@@ -295,6 +295,10 @@ func (s *stream) spawnControlMessageReader() {
 }
 
 func (s *stream) cleanup() {
+	// Even if we close the datachannel pion keeps a reference to the datachannel around.
+	// Remove the onBufferedAmountLow callback to ensure that we at least garbage collect
+	// memory we allocated for this stream.
+	s.dataChannel.OnBufferedAmountLow(nil)
 	s.dataChannel.Close()
 	if s.onDone != nil {
 		s.onDone()
