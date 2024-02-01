@@ -749,7 +749,7 @@ func (h *BasicHost) dialPeer(ctx context.Context, p peer.ID) error {
 	select {
 	case <-h.ids.IdentifyWait(c):
 	case <-ctx.Done():
-		return fmt.Errorf("identify failed to complete: %w", ctx.Err())
+		log.Debugf("identify didn't complete within deadline for: %s", p)
 	}
 
 	log.Debugf("host %s finished dialing %s", h.ID(), p)
