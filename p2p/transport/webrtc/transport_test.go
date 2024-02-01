@@ -301,7 +301,7 @@ func TestTransportWebRTC_DialerCanCreateStreamsMultiple(t *testing.T) {
 	require.NoError(t, err)
 
 	tr1, connectingPeer := getTransport(t)
-	done := make(chan struct{})
+	readerDone := make(chan struct{})
 
 	const (
 		numListeners = 10
@@ -335,34 +335,32 @@ func TestTransportWebRTC_DialerCanCreateStreamsMultiple(t *testing.T) {
 			}()
 		}
 		wg.Wait()
-		done <- struct{}{}
+		readerDone <- struct{}{}
 	}()
 
 	conn, err := tr1.Dial(context.Background(), listener.Multiaddr(), listeningPeer)
 	require.NoError(t, err)
-	t.Logf("dialer opened connection")
 
-	var wwg sync.WaitGroup
+	var writerWG sync.WaitGroup
 	var cnt atomic.Int32
 	var streamsStarted atomic.Int32
 	for i := 0; i < numWriters; i++ {
-		wwg.Add(1)
+		writerWG.Add(1)
 		go func() {
-			defer wwg.Done()
+			defer writerWG.Done()
+			buf := make([]byte, size)
 			for {
 				var nn int32
 				if nn = streamsStarted.Add(1); nn > int32(numStreams) {
 					return
 				}
+				rand.Read(buf)
+
 				s, err := conn.OpenStream(context.Background())
 				require.NoError(t, err)
-				//	t.Logf("dialer opened stream: %d %d", idx, s.(*stream).id)
-				buf := make([]byte, size)
-				rand.Read(buf)
 				n, err := s.Write(buf)
 				require.Equal(t, n, size)
 				require.NoError(t, err)
-
 				s.CloseWrite()
 				resp := make([]byte, size+10)
 				n, err = io.ReadFull(s, resp)
@@ -376,9 +374,9 @@ func TestTransportWebRTC_DialerCanCreateStreamsMultiple(t *testing.T) {
 			}
 		}()
 	}
-	wwg.Wait()
+	writerWG.Wait()
 	select {
-	case <-done:
+	case <-readerDone:
 	case <-time.After(100 * time.Second):
 		t.Fatal("timed out")
 	}

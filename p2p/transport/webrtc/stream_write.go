@@ -89,7 +89,7 @@ func (s *stream) Write(b []byte) (int, error) {
 		if end > availableSpace {
 			end = availableSpace
 		}
-		end -= protoOverhead + varintOverhead
+		end -= (protoOverhead + varintOverhead)
 		if end > len(b) {
 			end = len(b)
 		}
