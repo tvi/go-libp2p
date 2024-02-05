@@ -41,6 +41,7 @@ func (s *stream) Write(b []byte) (int, error) {
 	}()
 
 	var n int
+	var msg pb.Message
 	for len(b) > 0 {
 		if s.closeErr != nil {
 			return n, s.closeErr
@@ -89,12 +90,12 @@ func (s *stream) Write(b []byte) (int, error) {
 		if end > availableSpace {
 			end = availableSpace
 		}
-		end -= (protoOverhead + varintOverhead)
+		end -= protoOverhead + varintOverhead
 		if end > len(b) {
 			end = len(b)
 		}
-		msg := &pb.Message{Message: b[:end]}
-		if err := s.writer.WriteMsg(msg); err != nil {
+		msg = pb.Message{Message: b[:end]}
+		if err := s.writer.WriteMsg(&msg); err != nil {
 			return n, err
 		}
 		n += end
