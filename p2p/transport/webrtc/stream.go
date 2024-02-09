@@ -22,8 +22,11 @@ const (
 	// https://github.com/pion/webrtc/blob/v3.1.49/sctptransport.go#L341
 	maxBufferedAmount = 2 * maxMessageSize
 	// maxTotalControlMessagesSize is the maximum total size of all control messages we will
-	// write on this stream
-	maxTotalControlMessagesSize = 500
+	// write on this stream.
+	// 4 control messages of size 10 bytes + 10 bytes buffer. This number doesn't need to be
+	// exact. In the worst case, we enqueue these many bytes more in the webrtc peer connection
+	// send queue.
+	maxTotalControlMessagesSize = 50
 	// bufferedAmountLowThreshold and maxBufferedAmount are bound
 	// to a stream but congestion control is done on the whole
 	// SCTP association. This means that a single stream can monopolize
@@ -142,7 +145,6 @@ func (s *stream) Close() error {
 	}
 	s.mx.Unlock()
 
-	defer s.cleanup()
 	closeWriteErr := s.CloseWrite()
 	closeReadErr := s.CloseRead()
 	if closeWriteErr != nil || closeReadErr != nil {
