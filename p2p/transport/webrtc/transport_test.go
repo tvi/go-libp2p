@@ -687,11 +687,9 @@ func TestConnectionTimeoutOnListener(t *testing.T) {
 	// start dropping all packets
 	drop.Store(true)
 	start := time.Now()
-	// TODO: return timeout errors here
 	for {
 		if _, err := str.Write([]byte("test")); err != nil {
-			// TODO (sukunrt): Decide whether we want to keep this behaviour
-			//require.True(t, os.IsTimeout(err))
+			require.True(t, os.IsTimeout(err))
 			break
 		}
 

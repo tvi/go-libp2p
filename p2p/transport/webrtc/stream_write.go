@@ -19,8 +19,8 @@ func (s *stream) Write(b []byte) (int, error) {
 	s.mx.Lock()
 	defer s.mx.Unlock()
 
-	if s.closeErr != nil {
-		return 0, s.closeErr
+	if s.closeForShutdownErr != nil {
+		return 0, s.closeForShutdownErr
 	}
 	switch s.sendState {
 	case sendStateReset:
@@ -43,8 +43,8 @@ func (s *stream) Write(b []byte) (int, error) {
 	var n int
 	var msg pb.Message
 	for len(b) > 0 {
-		if s.closeErr != nil {
-			return n, s.closeErr
+		if s.closeForShutdownErr != nil {
+			return n, s.closeForShutdownErr
 		}
 		switch s.sendState {
 		case sendStateReset:

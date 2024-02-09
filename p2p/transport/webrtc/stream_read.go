@@ -15,8 +15,8 @@ func (s *stream) Read(b []byte) (int, error) {
 	s.mx.Lock()
 	defer s.mx.Unlock()
 
-	if s.closeErr != nil {
-		return 0, s.closeErr
+	if s.closeForShutdownErr != nil {
+		return 0, s.closeForShutdownErr
 	}
 	switch s.receiveState {
 	case receiveStateDataRead:
@@ -38,6 +38,10 @@ func (s *stream) Read(b []byte) (int, error) {
 			if err := s.reader.ReadMsg(&msg); err != nil {
 				s.mx.Lock()
 				if err == io.EOF {
+					// connection was closed
+					if s.closeForShutdownErr != nil {
+						return 0, s.closeForShutdownErr
+					}
 					// if the channel was properly closed, return EOF
 					if s.receiveState == receiveStateDataRead {
 						return 0, io.EOF
@@ -55,6 +59,10 @@ func (s *stream) Read(b []byte) (int, error) {
 				if s.receiveState == receiveStateDataRead {
 					return 0, io.EOF
 				}
+				// connection was closed
+				if s.closeForShutdownErr != nil {
+					return 0, s.closeForShutdownErr
+				}
 				return 0, err
 			}
 			s.mx.Lock()
@@ -71,8 +79,8 @@ func (s *stream) Read(b []byte) (int, error) {
 		// process flags on the message after reading all the data
 		s.processIncomingFlag(s.nextMessage.Flag)
 		s.nextMessage = nil
-		if s.closeErr != nil {
-			return read, s.closeErr
+		if s.closeForShutdownErr != nil {
+			return read, s.closeForShutdownErr
 		}
 		switch s.receiveState {
 		case receiveStateDataRead:
@@ -89,7 +97,7 @@ func (s *stream) CloseRead() error {
 	s.mx.Lock()
 	defer s.mx.Unlock()
 	var err error
-	if s.receiveState == receiveStateReceiving && s.closeErr == nil {
+	if s.receiveState == receiveStateReceiving && s.closeForShutdownErr == nil {
 		err = s.writer.WriteMsg(&pb.Message{Flag: pb.Message_STOP_SENDING.Enum()})
 		s.receiveState = receiveStateReset
 	}

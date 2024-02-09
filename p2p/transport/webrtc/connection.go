@@ -145,6 +145,9 @@ func (c *connection) closeWithError(err error) {
 	c.cancel()
 	// closing peerconnection will close the datachannels associated with the streams
 	c.pc.Close()
+	for _, s := range c.streams {
+		s.closeForShutdown(err)
+	}
 	c.scope.Done()
 }
 

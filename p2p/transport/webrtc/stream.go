@@ -96,10 +96,10 @@ type stream struct {
 	controlMessageReaderEndTime time.Time
 	controlMessageReaderDone    sync.WaitGroup
 
-	onDone      func()
-	id          uint16 // for logging purposes
-	dataChannel *datachannel.DataChannel
-	closeErr    error
+	onDone              func()
+	id                  uint16 // for logging purposes
+	dataChannel         *datachannel.DataChannel
+	closeForShutdownErr error
 }
 
 var _ network.MuxedStream = &stream{}
@@ -136,6 +136,13 @@ func newStream(
 }
 
 func (s *stream) Close() error {
+	s.mx.Lock()
+	if s.closeForShutdownErr != nil {
+		return s.closeForShutdownErr
+	}
+	s.mx.Unlock()
+
+	defer s.cleanup()
 	closeWriteErr := s.CloseWrite()
 	closeReadErr := s.CloseRead()
 	if closeWriteErr != nil || closeReadErr != nil {
@@ -155,14 +162,32 @@ func (s *stream) Close() error {
 }
 
 func (s *stream) Reset() error {
-	defer s.cleanup()
+	s.mx.Lock()
+	if s.closeForShutdownErr != nil {
+		return nil
+	}
+	s.mx.Unlock()
 
+	defer s.cleanup()
 	cancelWriteErr := s.cancelWrite()
 	closeReadErr := s.CloseRead()
 	if cancelWriteErr != nil {
 		return cancelWriteErr
 	}
 	return closeReadErr
+}
+
+func (s *stream) closeForShutdown(closeErr error) {
+	s.mx.Lock()
+	defer s.mx.Unlock()
+
+	s.closeForShutdownErr = closeErr
+	s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
+	select {
+	case s.sendStateChanged <- struct{}{}:
+	default:
+	}
+	s.cleanup()
 }
 
 func (s *stream) SetDeadline(t time.Time) error {
