@@ -37,11 +37,11 @@ func (s *stream) Read(b []byte) (int, error) {
 			var msg pb.Message
 			if err := s.reader.ReadMsg(&msg); err != nil {
 				s.mx.Lock()
+				// connection was closed
+				if s.closeForShutdownErr != nil {
+					return 0, s.closeForShutdownErr
+				}
 				if err == io.EOF {
-					// connection was closed
-					if s.closeForShutdownErr != nil {
-						return 0, s.closeForShutdownErr
-					}
 					// if the channel was properly closed, return EOF
 					if s.receiveState == receiveStateDataRead {
 						return 0, io.EOF
@@ -58,10 +58,6 @@ func (s *stream) Read(b []byte) (int, error) {
 				}
 				if s.receiveState == receiveStateDataRead {
 					return 0, io.EOF
-				}
-				// connection was closed
-				if s.closeForShutdownErr != nil {
-					return 0, s.closeForShutdownErr
 				}
 				return 0, err
 			}

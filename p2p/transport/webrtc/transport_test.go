@@ -689,7 +689,7 @@ func TestConnectionTimeoutOnListener(t *testing.T) {
 	start := time.Now()
 	for {
 		if _, err := str.Write([]byte("test")); err != nil {
-			require.True(t, os.IsTimeout(err))
+			require.True(t, os.IsTimeout(err), "invalid error type: %v", err)
 			break
 		}
 
@@ -697,7 +697,7 @@ func TestConnectionTimeoutOnListener(t *testing.T) {
 			t.Fatal("timeout")
 		}
 		// make sure to not write too often, we don't want to fill the flow control window
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	// make sure that accepting a stream also returns an error...
 	_, err = conn.AcceptStream()

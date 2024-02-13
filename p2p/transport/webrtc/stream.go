@@ -141,7 +141,8 @@ func newStream(
 func (s *stream) Close() error {
 	s.mx.Lock()
 	if s.closeForShutdownErr != nil {
-		return s.closeForShutdownErr
+		s.mx.Unlock()
+		return nil
 	}
 	s.mx.Unlock()
 
@@ -166,6 +167,7 @@ func (s *stream) Close() error {
 func (s *stream) Reset() error {
 	s.mx.Lock()
 	if s.closeForShutdownErr != nil {
+		s.mx.Unlock()
 		return nil
 	}
 	s.mx.Unlock()
@@ -180,6 +182,8 @@ func (s *stream) Reset() error {
 }
 
 func (s *stream) closeForShutdown(closeErr error) {
+	defer s.cleanup()
+
 	s.mx.Lock()
 	defer s.mx.Unlock()
 
@@ -189,7 +193,6 @@ func (s *stream) closeForShutdown(closeErr error) {
 	case s.sendStateChanged <- struct{}{}:
 	default:
 	}
-	s.cleanup()
 }
 
 func (s *stream) SetDeadline(t time.Time) error {
@@ -275,7 +278,8 @@ func (s *stream) spawnControlMessageReader() {
 				s.processIncomingFlag(s.nextMessage.Flag)
 				s.nextMessage = nil
 			}
-			for s.sendState != sendStateDataReceived && s.sendState != sendStateReset {
+			for s.closeForShutdownErr == nil &&
+				s.sendState != sendStateDataReceived && s.sendState != sendStateReset {
 				var msg pb.Message
 				if !setDeadline() {
 					return

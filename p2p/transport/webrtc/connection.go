@@ -145,7 +145,12 @@ func (c *connection) closeWithError(err error) {
 	c.cancel()
 	// closing peerconnection will close the datachannels associated with the streams
 	c.pc.Close()
-	for _, s := range c.streams {
+
+	c.m.Lock()
+	streams := c.streams
+	c.streams = nil
+	c.m.Unlock()
+	for _, s := range streams {
 		s.closeForShutdown(err)
 	}
 	c.scope.Done()
@@ -207,6 +212,9 @@ func (c *connection) Transport() tpt.Transport      { return c.transport }
 func (c *connection) addStream(str *stream) error {
 	c.m.Lock()
 	defer c.m.Unlock()
+	if c.streams == nil {
+		return c.closeErr
+	}
 	if _, ok := c.streams[str.id]; ok {
 		return errors.New("stream ID already exists")
 	}
