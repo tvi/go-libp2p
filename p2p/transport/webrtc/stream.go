@@ -136,30 +136,10 @@ func newStream(
 }
 
 func (s *stream) Close() error {
-	defer s.cleanup()
 	closeWriteErr := s.CloseWrite()
 	closeReadErr := s.CloseRead()
 	if closeWriteErr != nil || closeReadErr != nil {
 		s.Reset()
-		return errors.Join(closeWriteErr, closeReadErr)
-	}
-
-	s.mx.Lock()
-	s.controlMessageReaderEndTime = time.Now().Add(maxFINACKWait)
-	s.mx.Unlock()
-	s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
-	s.controlMessageReaderDone.Wait()
-	return nil
-}
-
-func (s *stream) AsyncClose(onDone func()) error {
-	closeWriteErr := s.CloseWrite()
-	closeReadErr := s.CloseRead()
-	if closeWriteErr != nil || closeReadErr != nil {
-		s.Reset()
-		if onDone != nil {
-			onDone()
-		}
 		return errors.Join(closeWriteErr, closeReadErr)
 	}
 	s.mx.Lock()
@@ -170,9 +150,6 @@ func (s *stream) AsyncClose(onDone func()) error {
 	go func() {
 		s.controlMessageReaderDone.Wait()
 		s.cleanup()
-		if onDone != nil {
-			onDone()
-		}
 	}()
 	return nil
 }

@@ -75,25 +75,9 @@ func (s *Stream) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// asyncCloser interface is implemented by transports that need to do expensive cleanup work
-// on stream close. Currently only WebRTC transport needs this. This interface is kept private
-// to swarm to discourage other transport implementations from using this mechanism. It is only
-// required because WebRTC datachannels have no Close functionality that would send the flush
-// the enqueued data.
-// see: https://github.com/libp2p/specs/issues/575
-type asyncCloser interface {
-	AsyncClose(onDone func()) error
-}
-
 // Close closes the stream, closing both ends and freeing all associated
 // resources.
 func (s *Stream) Close() error {
-	if as, ok := s.stream.(asyncCloser); ok {
-		err := as.AsyncClose(func() {
-			s.closeAndRemoveStream()
-		})
-		return err
-	}
 	err := s.stream.Close()
 	s.closeAndRemoveStream()
 	return err
