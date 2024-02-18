@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -683,7 +684,20 @@ func TestConnectionTimeoutOnListener(t *testing.T) {
 	start := time.Now()
 	for {
 		if _, err := str.Write([]byte("test")); err != nil {
-			require.True(t, os.IsTimeout(err), "invalid error type: %v", err)
+			if os.IsTimeout(err) {
+				break
+			}
+			// If we write when a connection timeout happens, sctp provides
+			// a "stream closed" error. This occurs concurrently with the
+			// callback we receive for connection timeout.
+			// Test once more after sleep that we provide the correct error.
+			if strings.Contains(err.Error(), "stream closed") {
+				time.Sleep(50 * time.Millisecond)
+				_, err = str.Write([]byte("test"))
+				require.True(t, os.IsTimeout(err), "invalid error type: %v", err)
+			} else {
+				t.Fatal("invalid error type", err)
+			}
 			break
 		}
 
