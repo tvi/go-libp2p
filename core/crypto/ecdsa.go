@@ -4,13 +4,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/asn1"
 	"errors"
 	"io"
 	"math/big"
-
-	"crypto/sha256"
 
 	pb "github.com/libp2p/go-libp2p/core/crypto/pb"
 	"github.com/libp2p/go-libp2p/core/internal/catch"

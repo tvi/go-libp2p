@@ -3,14 +3,13 @@ package noise
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"hash"
 	"os"
 	"runtime/debug"
 	"time"
-
-	"crypto/sha256"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"

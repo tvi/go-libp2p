@@ -2,10 +2,9 @@ package swarm_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"testing"
-
-	"crypto/sha256"
 
 	ic "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
