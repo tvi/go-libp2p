@@ -87,7 +87,18 @@ func (s *stream) Read(b []byte) (int, error) {
 	}
 }
 
-func (s *stream) SetReadDeadline(t time.Time) error { return s.dataChannel.SetReadDeadline(t) }
+func (s *stream) SetReadDeadline(t time.Time) error {
+	s.mx.Lock()
+	defer s.mx.Unlock()
+	if s.receiveState == receiveStateReceiving {
+		s.setDataChannelReadDeadline(t)
+	}
+	return nil
+}
+
+func (s *stream) setDataChannelReadDeadline(t time.Time) error {
+	return s.dataChannel.SetReadDeadline(t)
+}
 
 func (s *stream) CloseRead() error {
 	s.mx.Lock()

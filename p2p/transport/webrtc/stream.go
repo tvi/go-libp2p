@@ -142,15 +142,17 @@ func (s *stream) Close() error {
 		s.Reset()
 		return errors.Join(closeWriteErr, closeReadErr)
 	}
-	s.mx.Lock()
-	s.controlMessageReaderEndTime = time.Now().Add(maxFINACKWait)
-	s.mx.Unlock()
-	s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
 
-	go func() {
-		s.controlMessageReaderDone.Wait()
-		s.cleanup()
-	}()
+	s.mx.Lock()
+	if s.controlMessageReaderEndTime.IsZero() {
+		s.controlMessageReaderEndTime = time.Now().Add(maxFINACKWait)
+		s.setDataChannelReadDeadline(time.Now().Add(-1 * time.Hour))
+		go func() {
+			s.controlMessageReaderDone.Wait()
+			s.cleanup()
+		}()
+	}
+	s.mx.Unlock()
 	return nil
 }
 
@@ -165,10 +167,8 @@ func (s *stream) Reset() error {
 	defer s.cleanup()
 	cancelWriteErr := s.cancelWrite()
 	closeReadErr := s.CloseRead()
-	if cancelWriteErr != nil {
-		return cancelWriteErr
-	}
-	return closeReadErr
+	s.setDataChannelReadDeadline(time.Now().Add(-1 * time.Hour))
+	return errors.Join(closeReadErr, cancelWriteErr)
 }
 
 func (s *stream) closeForShutdown(closeErr error) {
@@ -178,7 +178,6 @@ func (s *stream) closeForShutdown(closeErr error) {
 	defer s.mx.Unlock()
 
 	s.closeForShutdownErr = closeErr
-	s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
 	s.notifyWriteStateChanged()
 }
 
@@ -230,18 +229,18 @@ func (s *stream) spawnControlMessageReader() {
 		go func() {
 			defer s.controlMessageReaderDone.Done()
 			// cleanup the sctp deadline timer goroutine
-			defer s.SetReadDeadline(time.Time{})
+			defer s.setDataChannelReadDeadline(time.Time{})
 
 			setDeadline := func() bool {
 				if s.controlMessageReaderEndTime.IsZero() || time.Now().Before(s.controlMessageReaderEndTime) {
-					s.SetReadDeadline(s.controlMessageReaderEndTime)
+					s.setDataChannelReadDeadline(s.controlMessageReaderEndTime)
 					return true
 				}
 				return false
 			}
 
 			// Unblock any Read call waiting on reader.ReadMsg
-			s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
+			s.setDataChannelReadDeadline(time.Now().Add(-1 * time.Hour))
 
 			s.readerMx.Lock()
 			// We have the lock any readers blocked on reader.ReadMsg have exited.

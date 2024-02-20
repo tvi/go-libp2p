@@ -451,7 +451,7 @@ func TestStreamConcurrentClose(t *testing.T) {
 func TestStreamResetAfterClose(t *testing.T) {
 	client, _ := getDetachedDataChannels(t)
 
-	done := make(chan bool, 1)
+	done := make(chan bool, 2)
 	clientStr := newStream(client.dc, client.rwc, func() { done <- true })
 	clientStr.Close()
 
