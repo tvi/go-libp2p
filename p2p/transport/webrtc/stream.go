@@ -83,12 +83,10 @@ type stream struct {
 	nextMessage  *pb.Message
 	receiveState receiveState
 
-	writer               pbio.Writer // concurrent writes prevented by mx
-	sendStateChanged     chan struct{}
-	sendState            sendState
-	writeDeadline        time.Time
-	writeDeadlineUpdated chan struct{}
-	writeAvailable       chan struct{}
+	writer            pbio.Writer // concurrent writes prevented by mx
+	writeStateChanged chan struct{}
+	sendState         sendState
+	writeDeadline     time.Time
 
 	controlMessageReaderOnce sync.Once
 	// controlMessageReaderEndTime is the end time for reading FIN_ACK from the control
@@ -113,38 +111,30 @@ func newStream(
 	onDone func(),
 ) *stream {
 	s := &stream{
-		reader: pbio.NewDelimitedReader(rwc, maxMessageSize),
-		writer: pbio.NewDelimitedWriter(rwc),
-
-		sendStateChanged:     make(chan struct{}, 1),
-		writeDeadlineUpdated: make(chan struct{}, 1),
-		writeAvailable:       make(chan struct{}, 1),
-
-		controlMessageReaderDone: sync.WaitGroup{},
-
-		id:          *channel.ID(),
-		dataChannel: rwc.(*datachannel.DataChannel),
-		onDone:      onDone,
+		reader:            pbio.NewDelimitedReader(rwc, maxMessageSize),
+		writer:            pbio.NewDelimitedWriter(rwc),
+		writeStateChanged: make(chan struct{}, 1),
+		id:                *channel.ID(),
+		dataChannel:       rwc.(*datachannel.DataChannel),
+		onDone:            onDone,
 	}
 	// released when the controlMessageReader goroutine exits
 	s.controlMessageReaderDone.Add(1)
 	s.dataChannel.SetBufferedAmountLowThreshold(bufferedAmountLowThreshold)
 	s.dataChannel.OnBufferedAmountLow(func() {
-		select {
-		case s.writeAvailable <- struct{}{}:
-		default:
-		}
+		s.notifyWriteStateChanged()
+
 	})
 	return s
 }
 
 func (s *stream) Close() error {
 	s.mx.Lock()
-	if s.closeForShutdownErr != nil {
-		s.mx.Unlock()
+	isClosed := s.closeForShutdownErr != nil
+	s.mx.Unlock()
+	if isClosed {
 		return nil
 	}
-	s.mx.Unlock()
 
 	closeWriteErr := s.CloseWrite()
 	closeReadErr := s.CloseRead()
@@ -166,11 +156,11 @@ func (s *stream) Close() error {
 
 func (s *stream) Reset() error {
 	s.mx.Lock()
-	if s.closeForShutdownErr != nil {
-		s.mx.Unlock()
+	isClosed := s.closeForShutdownErr != nil
+	s.mx.Unlock()
+	if isClosed {
 		return nil
 	}
-	s.mx.Unlock()
 
 	defer s.cleanup()
 	cancelWriteErr := s.cancelWrite()
@@ -189,10 +179,7 @@ func (s *stream) closeForShutdown(closeErr error) {
 
 	s.closeForShutdownErr = closeErr
 	s.SetReadDeadline(time.Now().Add(-1 * time.Hour))
-	select {
-	case s.sendStateChanged <- struct{}{}:
-	default:
-	}
+	s.notifyWriteStateChanged()
 }
 
 func (s *stream) SetDeadline(t time.Time) error {
@@ -214,16 +201,10 @@ func (s *stream) processIncomingFlag(flag *pb.Message_Flag) {
 		if s.sendState == sendStateSending || s.sendState == sendStateDataSent {
 			s.sendState = sendStateReset
 		}
-		select {
-		case s.sendStateChanged <- struct{}{}:
-		default:
-		}
+		s.notifyWriteStateChanged()
 	case pb.Message_FIN_ACK:
 		s.sendState = sendStateDataReceived
-		select {
-		case s.sendStateChanged <- struct{}{}:
-		default:
-		}
+		s.notifyWriteStateChanged()
 	case pb.Message_FIN:
 		if s.receiveState == receiveStateReceiving {
 			s.receiveState = receiveStateDataRead
@@ -285,8 +266,9 @@ func (s *stream) spawnControlMessageReader() {
 					return
 				}
 				s.mx.Unlock()
-				if err := s.reader.ReadMsg(&msg); err != nil {
-					s.mx.Lock()
+				err := s.reader.ReadMsg(&msg)
+				s.mx.Lock()
+				if err != nil {
 					// We have to manually manage deadline exceeded errors since pion/sctp can
 					// return deadline exceeded error for cancelled deadlines
 					// see: https://github.com/pion/sctp/pull/290/files
@@ -295,7 +277,6 @@ func (s *stream) spawnControlMessageReader() {
 					}
 					return
 				}
-				s.mx.Lock()
 				s.processIncomingFlag(msg.Flag)
 			}
 		}()

@@ -35,8 +35,9 @@ func (s *stream) Read(b []byte) (int, error) {
 			// load the next message
 			s.mx.Unlock()
 			var msg pb.Message
-			if err := s.reader.ReadMsg(&msg); err != nil {
-				s.mx.Lock()
+			err := s.reader.ReadMsg(&msg)
+			s.mx.Lock()
+			if err != nil {
 				// connection was closed
 				if s.closeForShutdownErr != nil {
 					return 0, s.closeForShutdownErr
@@ -61,7 +62,6 @@ func (s *stream) Read(b []byte) (int, error) {
 				}
 				return 0, err
 			}
-			s.mx.Lock()
 			s.nextMessage = &msg
 		}
 

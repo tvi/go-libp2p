@@ -76,12 +76,10 @@ func (s *stream) Write(b []byte) (int, error) {
 		if availableSpace < minMessageSize {
 			s.mx.Unlock()
 			select {
-			case <-s.writeAvailable:
 			case <-writeDeadlineChan:
 				s.mx.Lock()
 				return n, os.ErrDeadlineExceeded
-			case <-s.sendStateChanged:
-			case <-s.writeDeadlineUpdated:
+			case <-s.writeStateChanged:
 			}
 			s.mx.Lock()
 			continue
@@ -108,10 +106,7 @@ func (s *stream) SetWriteDeadline(t time.Time) error {
 	s.mx.Lock()
 	defer s.mx.Unlock()
 	s.writeDeadline = t
-	select {
-	case s.writeDeadlineUpdated <- struct{}{}:
-	default:
-	}
+	s.notifyWriteStateChanged()
 	return nil
 }
 
@@ -134,10 +129,7 @@ func (s *stream) cancelWrite() error {
 		return nil
 	}
 	s.sendState = sendStateReset
-	select {
-	case s.sendStateChanged <- struct{}{}:
-	default:
-	}
+	s.notifyWriteStateChanged()
 	if err := s.writer.WriteMsg(&pb.Message{Flag: pb.Message_RESET.Enum()}); err != nil {
 		return err
 	}
@@ -152,12 +144,16 @@ func (s *stream) CloseWrite() error {
 		return nil
 	}
 	s.sendState = sendStateDataSent
-	select {
-	case s.sendStateChanged <- struct{}{}:
-	default:
-	}
+	s.notifyWriteStateChanged()
 	if err := s.writer.WriteMsg(&pb.Message{Flag: pb.Message_FIN.Enum()}); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (s *stream) notifyWriteStateChanged() {
+	select {
+	case s.writeStateChanged <- struct{}{}:
+	default:
+	}
 }
