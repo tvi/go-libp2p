@@ -2,6 +2,7 @@ package libp2pwebrtc
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -13,22 +14,17 @@ import (
 	"testing"
 	"time"
 
-	manet "github.com/multiformats/go-multiaddr/net"
-
-	quicproxy "github.com/quic-go/quic-go/integrationtests/tools/proxy"
-
-	"golang.org/x/crypto/sha3"
-	"golang.org/x/exp/rand"
-
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-
 	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multibase"
 	"github.com/multiformats/go-multihash"
+	quicproxy "github.com/quic-go/quic-go/integrationtests/tools/proxy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/sha3"
 )
 
 func getTransport(t *testing.T, opts ...Option) (*WebRTCTransport, peer.ID) {
