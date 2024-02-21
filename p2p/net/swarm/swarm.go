@@ -173,7 +173,7 @@ type Swarm struct {
 		m map[network.Notifiee]struct{}
 	}
 
-	directConnNotifs struct {
+	unlimitedConnNotifs struct {
 		sync.Mutex
 		m map[peer.ID][]chan struct{}
 	}
@@ -237,7 +237,7 @@ func NewSwarm(local peer.ID, peers peerstore.Peerstore, eventBus event.Bus, opts
 	s.listeners.m = make(map[transport.Listener]struct{})
 	s.transports.m = make(map[int]transport.Transport)
 	s.notifs.m = make(map[network.Notifiee]struct{})
-	s.directConnNotifs.m = make(map[peer.ID][]chan struct{})
+	s.unlimitedConnNotifs.m = make(map[peer.ID][]chan struct{})
 
 	for _, opt := range opts {
 		if err := opt(s); err != nil {
@@ -397,17 +397,17 @@ func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn,
 	c.notifyLk.Lock()
 	s.conns.Unlock()
 
-	// Notify goroutines waiting for a direct connection
+	// Notify goroutines waiting for an unlimited connection
 	if !c.Stat().Transient {
-		// Go routines interested in waiting for direct connection first acquire this lock
+		// Go routines interested in waiting for an unlimited connection first acquire this lock
 		// and then acquire s.conns.RLock. Do not acquire this lock before conns.Unlock to
 		// prevent deadlock.
-		s.directConnNotifs.Lock()
-		for _, ch := range s.directConnNotifs.m[p] {
+		s.unlimitedConnNotifs.Lock()
+		for _, ch := range s.unlimitedConnNotifs.m[p] {
 			close(ch)
 		}
-		delete(s.directConnNotifs.m, p)
-		s.directConnNotifs.Unlock()
+		delete(s.unlimitedConnNotifs.m, p)
+		s.unlimitedConnNotifs.Unlock()
 	}
 
 	// Emit event after releasing `s.conns` lock so that a consumer can still
@@ -488,7 +488,7 @@ func (s *Swarm) NewStream(ctx context.Context, p peer.ID) (network.Stream, error
 		useTransient, _ := network.GetUseTransient(ctx)
 		if !useTransient && c.Stat().Transient {
 			var err error
-			c, err = s.waitForDirectConn(ctx, p)
+			c, err = s.waitForUnlimitedConn(ctx, p)
 			if err != nil {
 				return nil, err
 			}
@@ -505,23 +505,24 @@ func (s *Swarm) NewStream(ctx context.Context, p peer.ID) (network.Stream, error
 	}
 }
 
-// waitForDirectConn waits for a direct connection established through hole punching or connection reversal.
-func (s *Swarm) waitForDirectConn(ctx context.Context, p peer.ID) (*Conn, error) {
-	s.directConnNotifs.Lock()
+// waitForUnlimitedConn waits for an unlimited connection to be established through hole punching or
+// connection reversal.
+func (s *Swarm) waitForUnlimitedConn(ctx context.Context, p peer.ID) (*Conn, error) {
+	s.unlimitedConnNotifs.Lock()
 	c := s.bestConnToPeer(p)
 	if c == nil {
-		s.directConnNotifs.Unlock()
+		s.unlimitedConnNotifs.Unlock()
 		return nil, network.ErrNoConn
 	} else if !c.Stat().Transient {
-		s.directConnNotifs.Unlock()
+		s.unlimitedConnNotifs.Unlock()
 		return c, nil
 	}
 
-	// Wait for transient connection to upgrade to a direct connection either by
+	// Wait for transient connection to upgrade to an unlimited connection either by
 	// connection reversal or hole punching.
 	ch := make(chan struct{})
-	s.directConnNotifs.m[p] = append(s.directConnNotifs.m[p], ch)
-	s.directConnNotifs.Unlock()
+	s.unlimitedConnNotifs.m[p] = append(s.unlimitedConnNotifs.m[p], ch)
+	s.unlimitedConnNotifs.Unlock()
 
 	// apply the DialPeer timeout
 	ctx, cancel := context.WithTimeout(ctx, network.GetDialPeerTimeout(ctx))
@@ -531,15 +532,15 @@ func (s *Swarm) waitForDirectConn(ctx context.Context, p peer.ID) (*Conn, error)
 	select {
 	case <-ctx.Done():
 		// Remove ourselves from the notification list
-		s.directConnNotifs.Lock()
-		defer s.directConnNotifs.Unlock()
+		s.unlimitedConnNotifs.Lock()
+		defer s.unlimitedConnNotifs.Unlock()
 
-		s.directConnNotifs.m[p] = slices.DeleteFunc(
-			s.directConnNotifs.m[p],
+		s.unlimitedConnNotifs.m[p] = slices.DeleteFunc(
+			s.unlimitedConnNotifs.m[p],
 			func(c chan struct{}) bool { return c == ch },
 		)
-		if len(s.directConnNotifs.m[p]) == 0 {
-			delete(s.directConnNotifs.m, p)
+		if len(s.unlimitedConnNotifs.m[p]) == 0 {
+			delete(s.unlimitedConnNotifs.m, p)
 		}
 		return nil, ctx.Err()
 	case <-ch:
@@ -606,7 +607,7 @@ func isBetterConn(a, b *Conn) bool {
 func (s *Swarm) bestConnToPeer(p peer.ID) *Conn {
 
 	// TODO: Prefer some transports over others.
-	// For now, prefers direct connections over Relayed connections.
+	// For now, prefers direct connections over transient connections.
 	// For tie-breaking, select the newest non-closed connection with the most streams.
 	s.conns.RLock()
 	defer s.conns.RUnlock()
