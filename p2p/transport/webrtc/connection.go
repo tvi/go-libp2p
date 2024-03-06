@@ -175,7 +175,7 @@ func (c *connection) AcceptStream() (network.MuxedStream, error) {
 	case <-c.ctx.Done():
 		return nil, c.closeErr
 	case dc := <-c.acceptQueue:
-		str := newStream(dc.channel, dc.stream, maxRTT,func() { c.removeStream(*dc.channel.ID()) }, c.onDataChannelClose)
+		str := newStream(dc.channel, dc.stream, maxRTT, func() { c.removeStream(*dc.channel.ID()) }, c.onDataChannelClose)
 		if err := c.addStream(str); err != nil {
 			str.Reset()
 			return nil, err
@@ -215,6 +215,7 @@ func (c *connection) onDataChannelClose(remoteClosed bool) {
 	if !remoteClosed {
 		if c.invalidDataChannelClosures.Add(1) > maxInvalidDataChannelClosures {
 			c.closeOnce.Do(func() {
+				log.Error("closing connection as peer is not closing datachannels: ", c.RemotePeer(), c.RemoteMultiaddr())
 				c.closeWithError(errors.New("peer is not closing datachannels"))
 			})
 		}

@@ -257,7 +257,7 @@ func (s *stream) spawnControlMessageReader() {
 				}
 
 				// The stream is closed. Wait for 1RTT before erroring
-				if s.isClosed && endTime.IsZero() {
+				if s.sendState == sendStateDataSent && endTime.IsZero() {
 					endTime = time.Now().Add(s.rtt)
 				}
 				s.setDataChannelReadDeadline(endTime)
