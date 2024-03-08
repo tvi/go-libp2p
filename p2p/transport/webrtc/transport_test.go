@@ -27,7 +27,7 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-func getTransport(t *testing.T, opts ...Option) (*WebRTCTransport, peer.ID) {
+func getTransport(t testing.TB, opts ...Option) (*WebRTCTransport, peer.ID) {
 	t.Helper()
 	privKey, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	require.NoError(t, err)
