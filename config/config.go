@@ -27,6 +27,7 @@ import (
 	blankhost "github.com/libp2p/go-libp2p/p2p/host/blank"
 	"github.com/libp2p/go-libp2p/p2p/host/eventbus"
 	"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoremem"
+	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	routed "github.com/libp2p/go-libp2p/p2p/host/routed"
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	tptu "github.com/libp2p/go-libp2p/p2p/net/upgrader"
@@ -253,12 +254,13 @@ func (cfg *Config) addTransports() ([]fx.Option, error) {
 	}
 
 	fxopts = append(fxopts, fx.Provide(PrivKeyToStatelessResetKey))
+	fxopts = append(fxopts, fx.Provide(PrivKeyToTokenGeneratorKey))
 	if cfg.QUICReuse != nil {
 		fxopts = append(fxopts, cfg.QUICReuse...)
 	} else {
 		fxopts = append(fxopts,
-			fx.Provide(func(key quic.StatelessResetKey, _ *swarm.Swarm, lifecycle fx.Lifecycle) (*quicreuse.ConnManager, error) {
-				cm, err := quicreuse.NewConnManager(key)
+			fx.Provide(func(key quic.StatelessResetKey, tokenGenerator quic.TokenGeneratorKey, _ *swarm.Swarm, lifecycle fx.Lifecycle) (*quicreuse.ConnManager, error) {
+				cm, err := quicreuse.NewConnManager(key, tokenGenerator)
 				if err != nil {
 					return nil, err
 				}
@@ -326,6 +328,19 @@ func (cfg *Config) NewNode() (host.Host, error) {
 	if cfg.EnableAutoRelay && !cfg.Relay {
 		return nil, fmt.Errorf("cannot enable autorelay; relay is not enabled")
 	}
+	// If possible check that the resource manager conn limit is higher than the
+	// limit set in the conn manager.
+	if l, ok := cfg.ResourceManager.(connmgr.GetConnLimiter); ok {
+		err := cfg.ConnManager.CheckLimit(l)
+		if err != nil {
+			log.Warn(fmt.Sprintf("rcmgr limit conflicts with connmgr limit: %v", err))
+		}
+	}
+
+	if !cfg.DisableMetrics {
+		rcmgr.MustRegisterWith(cfg.PrometheusRegisterer)
+	}
+
 	fxopts := []fx.Option{
 		fx.Provide(func() event.Bus {
 			return eventbus.NewBus(eventbus.WithMetricsTracer(eventbus.NewMetricsTracer(eventbus.WithRegisterer(cfg.PrometheusRegisterer))))
@@ -348,7 +363,9 @@ func (cfg *Config) NewNode() (host.Host, error) {
 					// should probably fail if listening on *any* addr fails.
 					return sw.Listen(cfg.ListenAddrs...)
 				},
-				OnStop: func(context.Context) error { return sw.Close() },
+				OnStop: func(context.Context) error {
+					return sw.Close()
+				},
 			})
 			return sw
 		}),
@@ -379,12 +396,15 @@ func (cfg *Config) NewNode() (host.Host, error) {
 	// Note: h.AddrsFactory may be changed by relayFinder, but non-relay version is
 	// used by AutoNAT below.
 	if cfg.EnableAutoRelay {
-		mt := autorelay.WithMetricsTracer(autorelay.NewMetricsTracer(autorelay.WithRegisterer(cfg.PrometheusRegisterer)))
-		mtOpts := []autorelay.Option{mt}
-		autoRelayOpts := append(mtOpts, cfg.AutoRelayOpts...)
+		if !cfg.DisableMetrics {
+			mt := autorelay.WithMetricsTracer(
+				autorelay.NewMetricsTracer(autorelay.WithRegisterer(cfg.PrometheusRegisterer)))
+			mtOpts := []autorelay.Option{mt}
+			cfg.AutoRelayOpts = append(mtOpts, cfg.AutoRelayOpts...)
+		}
 		fxopts = append(fxopts,
 			fx.Invoke(func(h *bhost.BasicHost, lifecycle fx.Lifecycle) (*autorelay.AutoRelay, error) {
-				ar, err := autorelay.NewAutoRelay(h, autoRelayOpts...)
+				ar, err := autorelay.NewAutoRelay(h, cfg.AutoRelayOpts...)
 				if err != nil {
 					return nil, err
 				}

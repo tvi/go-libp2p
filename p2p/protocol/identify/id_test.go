@@ -614,7 +614,7 @@ func TestLargeIdentifyMessage(t *testing.T) {
 	require.NoError(t, h1.Connect(context.Background(), h2pi))
 
 	h1t2c := h1.Network().ConnsToPeer(h2p)
-	require.Equal(t, 1, len(h1t2c), "should have a conn here")
+	require.Len(t, h1t2c, 1, "should have a conn here")
 
 	ids1.IdentifyConn(h1t2c[0])
 
@@ -843,8 +843,10 @@ func TestIncomingIDStreamsTimeout(t *testing.T) {
 func TestOutOfOrderConnectedNotifs(t *testing.T) {
 	h1, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
+	defer h1.Close()
 	h2, err := libp2p.New(libp2p.ListenAddrs(ma.StringCast("/ip4/127.0.0.1/udp/0/quic-v1")))
 	require.NoError(t, err)
+	defer h2.Close()
 
 	doneCh := make(chan struct{})
 	errCh := make(chan error)

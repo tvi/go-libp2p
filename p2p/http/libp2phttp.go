@@ -48,7 +48,7 @@ type WellKnownHandler struct {
 	wellKnownCache   []byte
 }
 
-// streamHostListen retuns a net.Listener that listens on libp2p streams for HTTP/1.1 messages.
+// streamHostListen returns a net.Listener that listens on libp2p streams for HTTP/1.1 messages.
 func streamHostListen(streamHost host.Host) (net.Listener, error) {
 	return gostream.Listen(streamHost, ProtocolIDForMultistreamSelect)
 }
@@ -370,7 +370,9 @@ func (h *Host) SetHTTPHandlerAtPath(p protocol.ID, path string, handler http.Han
 	}
 	h.WellKnownHandler.AddProtocolMeta(p, ProtocolMeta{Path: path})
 	h.serveMuxInit()
-	h.ServeMux.Handle(path, http.StripPrefix(path, handler))
+	// Do not trim the trailing / from path
+	// This allows us to serve `/a/b` when we mount a handler for `/b` at path `/a`
+	h.ServeMux.Handle(path, http.StripPrefix(strings.TrimSuffix(path, "/"), handler))
 }
 
 // PeerMetadataGetter lets RoundTrippers implement a specific way of caching a peer's protocol mapping.

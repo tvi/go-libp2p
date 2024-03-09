@@ -199,7 +199,7 @@ func TestTransportConstructorQUIC(t *testing.T) {
 	err = h.Network().Listen(ma.StringCast("/ip4/127.0.0.1/tcp/0"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), swarm.ErrNoTransport.Error())
-}
+	}
 
 type mockTransport struct{}
 
@@ -328,8 +328,8 @@ func TestTransportCustomAddressWebTransport(t *testing.T) {
 	require.NotEqual(t, addrs[0], customAddr)
 	restOfAddr, lastComp := ma.SplitLast(addrs[0])
 	restOfAddr, secondToLastComp := ma.SplitLast(restOfAddr)
-	require.Equal(t, lastComp.Protocol().Code, ma.P_CERTHASH)
-	require.Equal(t, secondToLastComp.Protocol().Code, ma.P_CERTHASH)
+	require.Equal(t, ma.P_CERTHASH, lastComp.Protocol().Code)
+	require.Equal(t, ma.P_CERTHASH, secondToLastComp.Protocol().Code)
 	require.True(t, restOfAddr.Equal(customAddr))
 }
 
@@ -355,7 +355,7 @@ func TestTransportCustomAddressWebTransportDoesNotStall(t *testing.T) {
 	addrs := h.Addrs()
 	require.Len(t, addrs, 1)
 	_, lastComp := ma.SplitLast(addrs[0])
-	require.NotEqual(t, lastComp.Protocol().Code, ma.P_CERTHASH)
+	require.NotEqual(t, ma.P_CERTHASH, lastComp.Protocol().Code)
 	// We did not add the certhash to the multiaddr
 	require.Equal(t, addrs[0], customAddr)
 }

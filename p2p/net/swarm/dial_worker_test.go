@@ -26,12 +26,13 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoremem"
 	"github.com/libp2p/go-libp2p/p2p/muxer/yamux"
 	tptu "github.com/libp2p/go-libp2p/p2p/net/upgrader"
-	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
+	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/quicreuse"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
+	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -88,11 +89,11 @@ func makeSwarmWithNoListenAddrs(t *testing.T, opts ...Option) *Swarm {
 	if err := s.AddTransport(tcpTransport); err != nil {
 		t.Fatal(err)
 	}
-	reuse, err := quicreuse.NewConnManager([32]byte{})
+	reuse, err := quicreuse.NewConnManager(quic.StatelessResetKey{}, quic.TokenGeneratorKey{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	quicTransport, err := quic.NewTransport(priv, reuse, nil, nil, nil)
+	quicTransport, err := libp2pquic.NewTransport(priv, reuse, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,8 +485,8 @@ func TestDialQueueNextBatch(t *testing.T) {
 					}
 				}
 			}
-			if q.len() != 0 {
-				t.Errorf("expected queue to be empty at end. got: %d", q.len())
+			if q.Len() != 0 {
+				t.Errorf("expected queue to be empty at end. got: %d", q.Len())
 			}
 		})
 	}
@@ -968,7 +969,7 @@ func TestDialWorkerLoopHolePunching(t *testing.T) {
 		for i := 0; i < len(addrs); i++ {
 			delay := 10 * time.Second
 			if addrs[i].Equal(t1) {
-				//fire t1 immediately
+				// fire t1 immediately
 				delay = 0
 			} else if addrs[i].Equal(t2) {
 				// delay t2 by 100ms
@@ -1078,6 +1079,64 @@ func TestDialWorkerLoopAddrDedup(t *testing.T) {
 	case <-ch:
 		t.Errorf("didn't expect a connection attempt")
 	case <-time.After(5 * time.Second):
+		t.Errorf("expected a fail response")
+	}
+}
+
+func TestDialWorkerLoopTCPConnUpgradeWait(t *testing.T) {
+	s1 := makeSwarmWithNoListenAddrs(t, WithDialTimeout(10*time.Second))
+	s2 := makeSwarmWithNoListenAddrs(t, WithDialTimeout(10*time.Second))
+	defer s1.Close()
+	defer s2.Close()
+	// Connection to a1 will fail but a1 is a public address so we can test waiting for tcp
+	// connection established dial update. ipv4only.arpa reserved address.
+	a1 := ma.StringCast(fmt.Sprintf("/ip4/192.0.0.170/tcp/%d", 10001))
+	// Connection to a2 will succeed.
+	a2 := ma.StringCast(fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", 10002))
+	s2.Listen(a2)
+
+	s1.Peerstore().AddAddrs(s2.LocalPeer(), []ma.Multiaddr{a1, a2}, peerstore.PermanentAddrTTL)
+
+	rankerCalled := make(chan struct{})
+	s1.dialRanker = func(addrs []ma.Multiaddr) []network.AddrDelay {
+		defer close(rankerCalled)
+		return []network.AddrDelay{{Addr: a1, Delay: 0}, {Addr: a2, Delay: 100 * time.Millisecond}}
+	}
+
+	reqch := make(chan dialRequest)
+	resch := make(chan dialResponse, 2)
+	cl := newMockClock()
+	worker := newDialWorker(s1, s2.LocalPeer(), reqch, cl)
+	go worker.loop()
+	defer worker.wg.Wait()
+	defer close(reqch)
+
+	reqch <- dialRequest{ctx: context.Background(), resch: resch}
+
+	<-rankerCalled
+	// Wait a bit to let the loop make the dial attempt to a1
+	time.Sleep(1 * time.Second)
+	// Send conn established for a1
+	worker.resch <- transport.DialUpdate{Kind: transport.UpdateKindHandshakeProgressed, Addr: a1}
+	// Dial to a2 shouldn't happen even if a2 is scheduled to dial by now
+	cl.AdvanceBy(200 * time.Millisecond)
+	select {
+	case r := <-resch:
+		t.Fatalf("didn't expect any event on resch %s %s", r.err, r.conn)
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	// Dial to a2 should happen now
+	// This number is high because there's a race between this goroutine advancing the clock
+	// and the worker loop goroutine processing the TCPConnectionEstablished event.
+	// In case it processes the event after the previous clock advancement we need to wait
+	// 2 * PublicTCPDelay.
+	cl.AdvanceBy(2 * PublicTCPDelay)
+	select {
+	case r := <-resch:
+		require.NoError(t, r.err)
+		require.NotNil(t, r.conn)
+	case <-time.After(3 * time.Second):
 		t.Errorf("expected a fail response")
 	}
 }
