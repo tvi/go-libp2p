@@ -520,6 +520,12 @@ func TestTransportWebRTC_RemoteReadsAfterClose(t *testing.T) {
 	defer listener.Close()
 
 	tr1, _ := getTransport(t)
+	t.Log("listener multiaddr", listenMultiaddr)
+	ifaces, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Fatalf("couldn't obtain interfaces")
+	}
+	t.Log("net interfaces", ifaces)
 
 	done := make(chan error)
 	go func() {
