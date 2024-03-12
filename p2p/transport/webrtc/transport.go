@@ -78,7 +78,7 @@ const (
 const (
 	DefaultDisconnectedTimeout = 20 * time.Second
 	DefaultFailedTimeout       = 30 * time.Second
-	DefaultKeepaliveTimeout    = 15 * time.Second
+	DefaultKeepaliveTimeout    = 5 * time.Second
 )
 
 type WebRTCTransport struct {

@@ -318,14 +318,13 @@ func (l *listener) Multiaddr() ma.Multiaddr {
 }
 
 // addOnConnectionStateChangeCallback adds the OnConnectionStateChange to the PeerConnection.
-// The channel returned here:
-// * is closed when the state changes to Connection
-// * receives an error when the state changes to Failed
-// * doesn't receive anything (nor is closed) when the state changes to Disconnected
+// If the connection establishment errors, an error is written to the channel before closing.
+// If the connection establishment is successful, the channel is closed without writing anything.
 func addOnConnectionStateChangeCallback(pc *webrtc.PeerConnection) <-chan error {
 	errC := make(chan error, 1)
 	var once sync.Once
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		fmt.Println("connection state: ", state)
 		switch state {
 		case webrtc.PeerConnectionStateConnected:
 			once.Do(func() { close(errC) })
@@ -340,6 +339,13 @@ func addOnConnectionStateChangeCallback(pc *webrtc.PeerConnection) <-chan error 
 			// If the connection then receives packets on the connection, it can move back to the connected state.
 			// If no packets are received until the failed timeout is triggered, the connection moves to the failed state.
 			log.Warn("peerconnection disconnected")
+		case webrtc.PeerConnectionStateClosed:
+			// ConnectionStateClosed is a terminal state. This happens when the peer closes the PeerConnection before
+			// connection establishment.
+			once.Do(func() {
+				errC <- errors.New("peerconnection closed")
+				close(errC)
+			})
 		}
 	})
 	return errC

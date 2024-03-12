@@ -110,14 +110,16 @@ func TestTransportWebRTC_CanListenSingle(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		_, err := tr1.Dial(context.Background(), listener.Multiaddr(), listeningPeer)
+		conn, err := tr1.Dial(context.Background(), listener.Multiaddr(), listeningPeer)
 		assert.NoError(t, err)
+		t.Cleanup(func() { conn.Close() })
 		close(done)
 	}()
 
 	conn, err := listener.Accept()
 	require.NoError(t, err)
 	require.NotNil(t, conn)
+	defer conn.Close()
 
 	require.Equal(t, connectingPeer, conn.RemotePeer())
 	select {
@@ -170,12 +172,14 @@ func TestTransportWebRTC_CanListenMultiple(t *testing.T) {
 			defer wg.Done()
 			ctr, _ := getTransport(t)
 			conn, err := ctr.Dial(ctx, listener.Multiaddr(), listeningPeer)
+			if conn != nil {
+				t.Cleanup(func() { conn.Close() })
+			}
 			select {
 			case <-ctx.Done():
 			default:
 				assert.NoError(t, err)
 				assert.NotNil(t, conn)
-				t.Cleanup(func() { conn.Close() })
 			}
 		}()
 	}
