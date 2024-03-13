@@ -8,5 +8,4 @@ runs:
     - name: Run nocover tests. These are tests that require the coverage analysis to be off # See https://github.com/protocol/.github/issues/460
       shell: bash
       # This matches only tests with "NoCover" in their test name to avoid running all tests again.
-      run: GOLOG_LOG_LEVEL=debug go test -v -run TestTransportWebRTC ./...
-
+      run: go test -tags nocover -run NoCover -v ./...
