@@ -320,7 +320,7 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 		return nil, fmt.Errorf("instantiating peer connection failed: %w", err)
 	}
 
-	errC := addOnConnectionStateChangeCallback(w.PeerConnection, "dialer")
+	errC := addOnConnectionStateChangeCallback(w.PeerConnection, "dialer", ufrag)
 
 	// do offer-answer exchange
 	offer, err := w.PeerConnection.CreateOffer(nil)

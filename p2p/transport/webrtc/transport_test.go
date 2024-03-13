@@ -827,6 +827,7 @@ func TestTransportWebRTC_ManyConnections(t *testing.T) {
 				buf := make([]byte, 10)
 				stream.Read(buf)
 				lconn.Close()
+				fmt.Println("conn done")
 			}()
 		}
 	}()
@@ -859,9 +860,13 @@ func TestTransportWebRTC_ManyConnections(t *testing.T) {
 	}
 
 	go func() {
+		sem := make(chan struct{}, 10)
 		for i := 0; i < N; i++ {
-			dialAndReceiveData()
-			fmt.Println("completed connection", i)
+			sem <- struct{}{}
+			go func() {
+				dialAndReceiveData()
+				<-sem
+			}()
 		}
 	}()
 
