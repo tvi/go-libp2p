@@ -808,7 +808,7 @@ func TestTransportWebRTC_ManyConnections(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	N := 1000
+	N := 2000
 	errs := make(chan error, N)
 
 	// exits on listener close
