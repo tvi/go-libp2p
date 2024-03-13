@@ -128,4 +128,4 @@ require (
 	lukechampine.com/blake3 v1.2.1 // indirect
 )
 
-replace github.com/pion/webrtc/v3 => github.com/pion/webrtc/v3 v3.2.30-0.20240313113351-46bc73031dfa
+replace github.com/pion/webrtc/v3 => github.com/pion/webrtc/v3 v3.2.30-0.20240313140901-206073ca703a
