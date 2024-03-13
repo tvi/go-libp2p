@@ -324,7 +324,7 @@ func addOnConnectionStateChangeCallback(pc *webrtc.PeerConnection, side string) 
 	errC := make(chan error, 1)
 	var once sync.Once
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		fmt.Println(side, "connection state: ", state)
+		fmt.Printf("%p: %s connection state: %v\n", pc, side, state)
 		switch state {
 		case webrtc.PeerConnectionStateConnected:
 			once.Do(func() { close(errC) })
