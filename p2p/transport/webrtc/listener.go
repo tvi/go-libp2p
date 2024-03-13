@@ -215,7 +215,7 @@ func (l *listener) setupConnection(
 		return nil, fmt.Errorf("instantiating peer connection failed: %w", err)
 	}
 
-	errC := addOnConnectionStateChangeCallback(w.PeerConnection)
+	errC := addOnConnectionStateChangeCallback(w.PeerConnection, "listener")
 	// Infer the client SDP from the incoming STUN message by setting the ice-ufrag.
 	if err := w.PeerConnection.SetRemoteDescription(webrtc.SessionDescription{
 		SDP:  createClientSDP(candidate.Addr, candidate.Ufrag),
@@ -320,11 +320,11 @@ func (l *listener) Multiaddr() ma.Multiaddr {
 // addOnConnectionStateChangeCallback adds the OnConnectionStateChange to the PeerConnection.
 // If the connection establishment errors, an error is written to the channel before closing.
 // If the connection establishment is successful, the channel is closed without writing anything.
-func addOnConnectionStateChangeCallback(pc *webrtc.PeerConnection) <-chan error {
+func addOnConnectionStateChangeCallback(pc *webrtc.PeerConnection, side string) <-chan error {
 	errC := make(chan error, 1)
 	var once sync.Once
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		fmt.Println("connection state: ", state)
+		fmt.Println(side, "connection state: ", state)
 		switch state {
 		case webrtc.PeerConnectionStateConnected:
 			once.Do(func() { close(errC) })
