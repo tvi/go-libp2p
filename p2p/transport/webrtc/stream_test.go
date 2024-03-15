@@ -100,11 +100,11 @@ func getDetachedDataChannels(t *testing.T) (detachedChan, detachedChan) {
 	return <-answerChan, <-offerRWCChan
 }
 
-// checkDataChannelClosed checks if the datachannel has been closed.
+// assertDataChannelOpen checks if the datachannel is open.
 // It sends empty messages on the data channel to check if the channel is still open.
 // The control message reader goroutine depends on exclusive access to datachannel.Read
 // so we have to depend on Write to determine whether the channel has been closed.
-func checkDataChannelOpen(t *testing.T, dc *datachannel.DataChannel) {
+func assertDataChannelOpen(t *testing.T, dc *datachannel.DataChannel) {
 	t.Helper()
 	emptyMsg := &pb.Message{}
 	msg, err := proto.Marshal(emptyMsg)
@@ -120,11 +120,11 @@ func checkDataChannelOpen(t *testing.T, dc *datachannel.DataChannel) {
 	}
 }
 
-// checkDataChannelClosed checks if the datachannel has been closed.
+// assertDataChannelClosed checks if the datachannel is closed.
 // It sends empty messages on the data channel to check if the channel has been closed.
 // The control message reader goroutine depends on exclusive access to datachannel.Read
 // so we have to depend on Write to determine whether the channel has been closed.
-func checkDataChannelClosed(t *testing.T, dc *datachannel.DataChannel) {
+func assertDataChannelClosed(t *testing.T, dc *datachannel.DataChannel) {
 	t.Helper()
 	emptyMsg := &pb.Message{}
 	msg, err := proto.Marshal(emptyMsg)
@@ -418,7 +418,7 @@ func TestStreamCloseAfterFINACK(t *testing.T) {
 	_, err := serverStr.Read(b)
 	require.Error(t, err)
 	require.ErrorIs(t, err, io.EOF)
-	checkDataChannelClosed(t, client.rwc.(*datachannel.DataChannel))
+	assertDataChannelClosed(t, client.rwc.(*datachannel.DataChannel))
 }
 
 // TestStreamFinAckAfterStopSending tests that FIN_ACK is sent even after the write half
@@ -451,8 +451,8 @@ func TestStreamFinAckAfterStopSending(t *testing.T) {
 	_, err := serverStr.Read(b)
 	require.NoError(t, err)
 	serverStr.Close() // Sends stop_sending, fin
-	checkDataChannelClosed(t, server.rwc.(*datachannel.DataChannel))
-	checkDataChannelClosed(t, client.rwc.(*datachannel.DataChannel))
+	assertDataChannelClosed(t, server.rwc.(*datachannel.DataChannel))
+	assertDataChannelClosed(t, client.rwc.(*datachannel.DataChannel))
 }
 
 func TestStreamConcurrentClose(t *testing.T) {
@@ -486,8 +486,8 @@ func TestStreamConcurrentClose(t *testing.T) {
 	}
 
 	// Wait for FIN_ACK AND datachannel close
-	checkDataChannelClosed(t, client.rwc.(*datachannel.DataChannel))
-	checkDataChannelClosed(t, server.rwc.(*datachannel.DataChannel))
+	assertDataChannelClosed(t, client.rwc.(*datachannel.DataChannel))
+	assertDataChannelClosed(t, server.rwc.(*datachannel.DataChannel))
 
 }
 
@@ -504,11 +504,11 @@ func TestStreamResetAfterClose(t *testing.T) {
 		t.Fatalf("Close should run cleanup immediately")
 	}
 	// The server data channel should still be open
-	checkDataChannelOpen(t, server.rwc.(*datachannel.DataChannel))
+	assertDataChannelOpen(t, server.rwc.(*datachannel.DataChannel))
 	clientStr.Reset()
 	// Reset closes the datachannels
-	checkDataChannelClosed(t, server.rwc.(*datachannel.DataChannel))
-	checkDataChannelClosed(t, client.rwc.(*datachannel.DataChannel))
+	assertDataChannelClosed(t, server.rwc.(*datachannel.DataChannel))
+	assertDataChannelClosed(t, client.rwc.(*datachannel.DataChannel))
 	select {
 	case <-done:
 		t.Fatalf("onDone should not be called twice")
@@ -535,8 +535,8 @@ func TestStreamDataChannelCloseOnFINACK(t *testing.T) {
 	err := serverWriter.WriteMsg(&pb.Message{Flag: pb.Message_FIN_ACK.Enum()})
 	require.NoError(t, err)
 
-	checkDataChannelClosed(t, server.rwc.(*datachannel.DataChannel))
-	checkDataChannelClosed(t, client.rwc.(*datachannel.DataChannel))
+	assertDataChannelClosed(t, server.rwc.(*datachannel.DataChannel))
+	assertDataChannelClosed(t, client.rwc.(*datachannel.DataChannel))
 }
 
 func TestStreamChunking(t *testing.T) {
