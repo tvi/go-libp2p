@@ -204,6 +204,7 @@ func (l *listener) setupConnection(
 		l.transport.peerConnectionTimeouts.Failed,
 		l.transport.peerConnectionTimeouts.Keepalive,
 	)
+	settingEngine.SetSCTPMaxReceiveBufferSize(1000_000)
 	settingEngine.DetachDataChannels()
 
 	w, err = newWebRTCConnection(settingEngine, l.config)

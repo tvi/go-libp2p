@@ -314,6 +314,7 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 	// If you run pion on a system with only the loopback interface UP,
 	// it will not connect to anything.
 	settingEngine.SetIncludeLoopbackCandidate(true)
+	settingEngine.SetSCTPMaxReceiveBufferSize(1000_000)
 
 	w, err = newWebRTCConnection(settingEngine, t.webrtcConfig)
 	if err != nil {
