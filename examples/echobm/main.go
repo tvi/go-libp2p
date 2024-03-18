@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync/atomic"
+	"time"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -39,6 +41,8 @@ func runServer() {
 		panic(err)
 	}
 
+	var totalBytes atomic.Int64
+
 	h.SetStreamHandler("echobench10M", func(s network.Stream) {
 		buf := make([]byte, 100_000)
 		for {
@@ -50,7 +54,8 @@ func runServer() {
 					return
 				}
 				tr += n
-				if tr >= n {
+				totalBytes.Add(int64(n))
+				if tr >= N {
 					break
 				}
 			}
@@ -61,7 +66,8 @@ func runServer() {
 					fmt.Println("stream completed with", s.Conn().RemoteMultiaddr(), err)
 				}
 				tw += n
-				if tw >= n {
+				totalBytes.Add(int64(n))
+				if tw >= N {
 					break
 				}
 			}
@@ -71,6 +77,20 @@ func runServer() {
 	for _, a := range h.Addrs() {
 		fmt.Printf("%s/p2p/%s\n\n", a, h.ID())
 	}
+	go func() {
+		prevBytes := 0
+		for {
+			time.Sleep(1 * time.Second)
+			tb := totalBytes.Load()
+			bytesTransferred := tb - int64(prevBytes)
+			prevBytes = int(tb)
+			if bytesTransferred == 0 {
+				continue
+			}
+			speed := float64(bytesTransferred*8) / (1000_000)
+			fmt.Printf("throughput: %0.1f Mb/s\n", speed)
+		}
+	}()
 	select {}
 }
 
@@ -104,7 +124,7 @@ func runClient() {
 				return
 			}
 			tw += n
-			if tw >= n {
+			if tw >= N {
 				break
 			}
 		}
@@ -116,7 +136,7 @@ func runClient() {
 				return
 			}
 			tr += n
-			if tr >= n {
+			if tr >= N {
 				break
 			}
 		}

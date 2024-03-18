@@ -1,4 +1,4 @@
-module echobm
+module github.com/libp2p/go-libp2p/examples/echobm
 
 go 1.23
 
