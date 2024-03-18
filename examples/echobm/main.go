@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -11,7 +13,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
+	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	libp2pwebrtc "github.com/libp2p/go-libp2p/p2p/transport/webrtc"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
@@ -28,14 +32,23 @@ func main() {
 	} else {
 		panic("invalid mode")
 	}
+	select {}
 }
 
 func runServer() {
 	port := os.Args[2]
-	addr := fmt.Sprintf("/ip4/0.0.0.0/udp/%s/webrtc-direct", port)
+	var addr string
+	tpt := os.Args[3]
+	if tpt == "quic" {
+		addr = fmt.Sprintf("/ip4/0.0.0.0/udp/%s/quic-v1", port)
+	} else {
+		addr = fmt.Sprintf("/ip4/0.0.0.0/udp/%s/webrtc-direct", port)
+	}
 	h, err := libp2p.New(
 		libp2p.Transport(libp2pwebrtc.New),
+		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.ListenAddrStrings(addr),
+		libp2p.ResourceManager(&network.NullResourceManager{}),
 	)
 	if err != nil {
 		panic(err)
@@ -44,7 +57,7 @@ func runServer() {
 	var totalBytes atomic.Int64
 
 	h.SetStreamHandler("echobench10M", func(s network.Stream) {
-		buf := make([]byte, 100_000)
+		buf := make([]byte, 1000_000)
 		for {
 			tr := 0
 			for {
@@ -67,8 +80,11 @@ func runServer() {
 				}
 				tw += n
 				totalBytes.Add(int64(n))
-				if tw >= N {
+				if tw == N {
 					break
+				}
+				if tw > N {
+					panic("short write")
 				}
 			}
 		}
@@ -91,30 +107,55 @@ func runServer() {
 			fmt.Printf("throughput: %0.1f Mb/s\n", speed)
 		}
 	}()
-	select {}
+
+	go func() {
+		http.ListenAndServe("0.0.0.0:5001", promhttp.Handler())
+	}()
 }
 
 func runClient() {
 	srv := os.Args[2]
+	conns, err := strconv.Atoi(os.Args[3])
+	if err != nil {
+		panic(err)
+	}
+	streams, err := strconv.Atoi(os.Args[4])
+	if err != nil {
+		panic(err)
+	}
+	for i := 0; i < conns; i++ {
+		runClientConn(srv, streams)
+	}
+}
+
+func runClientConn(server string, streams int) {
 	h, err := libp2p.New(
 		libp2p.Transport(libp2pwebrtc.New),
+		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.NoListenAddrs,
+		libp2p.ResourceManager(&network.NullResourceManager{}),
 	)
 	if err != nil {
 		panic(err)
 	}
 
-	ai, err := peer.AddrInfoFromString(srv)
+	ai, err := peer.AddrInfoFromString(server)
 	if err != nil {
 		panic(err)
 	}
 
 	h.Peerstore().AddAddrs(ai.ID, ai.Addrs, peerstore.PermanentAddrTTL)
-	s, err := h.NewStream(context.Background(), ai.ID, "echobench10M")
-	if err != nil {
-		panic(err)
+	for i := 0; i < streams; i++ {
+		s, err := h.NewStream(context.Background(), ai.ID, "echobench10M")
+		if err != nil {
+			panic(err)
+		}
+		go runClientStream(s)
 	}
-	buf := make([]byte, 100_000)
+}
+
+func runClientStream(s network.Stream) {
+	buf := make([]byte, 1000_000)
 	for {
 		tw := 0
 		for {
@@ -124,8 +165,11 @@ func runClient() {
 				return
 			}
 			tw += n
-			if tw >= N {
+			if tw == N {
 				break
+			}
+			if tw > N {
+				panic("short write")
 			}
 		}
 		tr := 0
