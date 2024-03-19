@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	bufSize = 100_000
+	bufSize = 1000_000
 	N       = 10_000_000
 )
 
@@ -57,7 +57,7 @@ func runServer() {
 	var totalBytes atomic.Int64
 
 	h.SetStreamHandler("echobench10M", func(s network.Stream) {
-		buf := make([]byte, 1000_000)
+		buf := make([]byte, bufSize)
 		for {
 			tr := 0
 			for {
@@ -156,7 +156,7 @@ func runClientConn(server string, streams int) {
 }
 
 func runClientStream(s network.Stream) {
-	buf := make([]byte, 1000_000)
+	buf := make([]byte, bufSize)
 	for {
 		tw := 0
 		for {
