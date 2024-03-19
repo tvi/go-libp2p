@@ -77,6 +77,7 @@ func runServer() {
 				n, err := s.Write(buf)
 				if err != nil {
 					fmt.Println("stream completed with", s.Conn().RemoteMultiaddr(), err)
+					return
 				}
 				tw += n
 				totalBytes.Add(int64(n))
