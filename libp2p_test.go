@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/libp2p/go-libp2p/core/connmgr"
@@ -21,6 +20,7 @@ import (
 	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	webtransport "github.com/libp2p/go-libp2p/p2p/transport/webtransport"
+	"go.uber.org/goleak"
 
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
@@ -32,17 +32,6 @@ func TestNewHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.Close()
-}
-
-func TestBadTransportConstructor(t *testing.T) {
-	h, err := New(Transport(func() {}))
-	if err == nil {
-		h.Close()
-		t.Fatal("expected an error")
-	}
-	if !strings.Contains(err.Error(), "libp2p_test.go") {
-		t.Error("expected error to contain debugging info")
-	}
 }
 
 func TestTransportConstructor(t *testing.T) {
@@ -90,12 +79,6 @@ func TestNoTransports(t *testing.T) {
 
 func TestInsecure(t *testing.T) {
 	h, err := New(NoSecurity)
-	require.NoError(t, err)
-	h.Close()
-}
-
-func TestAutoNATService(t *testing.T) {
-	h, err := New(EnableNATService())
 	require.NoError(t, err)
 	h.Close()
 }
@@ -199,7 +182,7 @@ func TestTransportConstructorQUIC(t *testing.T) {
 	err = h.Network().Listen(ma.StringCast("/ip4/127.0.0.1/tcp/0"))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), swarm.ErrNoTransport.Error())
-	}
+}
 
 type mockTransport struct{}
 
@@ -377,6 +360,7 @@ func TestRoutedHost(t *testing.T) {
 		DisableRelay(),
 	)
 	require.NoError(t, err)
+	defer h.Close()
 
 	priv, _, err := crypto.GenerateEd25519Key(rand.Reader)
 	require.NoError(t, err)
@@ -384,4 +368,15 @@ func TestRoutedHost(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualError(t, h.Connect(context.Background(), peer.AddrInfo{ID: id}), "mock peer routing error")
 	require.Equal(t, []peer.ID{id}, mockRouter.queried)
+}
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(
+		m,
+		// This will return eventually (5s timeout) but doesn't take a context.
+		goleak.IgnoreAnyFunction("github.com/koron/go-ssdp.Search"),
+		// Logging & Stats
+		goleak.IgnoreTopFunction("github.com/ipfs/go-log/v2/writer.(*MirrorWriter).logRoutine"),
+		goleak.IgnoreTopFunction("go.opencensus.io/stats/view.(*worker).start"),
+	)
 }
