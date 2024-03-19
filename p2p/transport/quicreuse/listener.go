@@ -154,14 +154,14 @@ func (l *quicListener) Run() error {
 }
 
 func (l *quicListener) Close() error {
-		// listener close is not safe to use concurrently with transport close.
+	// listener close is not safe to use concurrently with transport close.
 	// remove after https://github.com/quic-go/quic-go/issues/4266 is fixed.
 	l.closeMx.Lock()
-		err := l.l.Close()
+	err := l.l.Close()
 	l.closeMx.Unlock()
-	
+
 	<-l.running // wait for Run to return
-		return err
+	return err
 }
 
 const queueLen = 16
