@@ -378,5 +378,6 @@ func TestMain(m *testing.M) {
 		// Logging & Stats
 		goleak.IgnoreTopFunction("github.com/ipfs/go-log/v2/writer.(*MirrorWriter).logRoutine"),
 		goleak.IgnoreTopFunction("go.opencensus.io/stats/view.(*worker).start"),
+		goleak.IgnoreTopFunction("ithub.com/jackpal/go-nat-pmp.(*Client).GetExternalAddress"),
 	)
 }
