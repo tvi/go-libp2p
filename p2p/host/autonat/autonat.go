@@ -434,6 +434,9 @@ func (as *AmbientAutoNAT) Close() error {
 		as.service.Disable()
 	}
 	<-as.backgroundRunning
+	if as.service != nil {
+		return as.service.Close()
+	}
 	return nil
 }
 
@@ -444,7 +447,7 @@ func (s *StaticAutoNAT) Status() network.Reachability {
 
 func (s *StaticAutoNAT) Close() error {
 	if s.service != nil {
-		s.service.Disable()
+		return s.service.Close()
 	}
 	return nil
 }
