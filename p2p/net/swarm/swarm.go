@@ -395,6 +395,11 @@ func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn,
 	c.streams.m = make(map[*Stream]struct{})
 	s.conns.m[p] = append(s.conns.m[p], c)
 
+	newState := network.Limited
+	if !isTransient {
+		newState = network.Connected
+	}
+
 	// Add two swarm refs:
 	// * One will be decremented after the close notifications fire in Conn.doClose
 	// * The other will be decremented when Conn.start exits.
@@ -405,10 +410,7 @@ func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn,
 	c.notifyLk.Lock()
 	s.conns.Unlock()
 
-	newState := network.Transient
 	if !isTransient {
-		newState = network.Connected
-
 		// Notify goroutines waiting for a direct connection
 		//
 		// Go routines interested in waiting for direct connection first acquire this lock
@@ -678,7 +680,7 @@ func (s *Swarm) connectednessUnlocked(p peer.ID) network.Connectedness {
 		}
 	}
 	if haveTransient {
-		return network.Transient
+		return network.Limited
 	} else {
 		return network.NotConnected
 	}
