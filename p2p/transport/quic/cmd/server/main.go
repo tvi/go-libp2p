@@ -28,7 +28,7 @@ func main() {
 }
 
 func run(port string) error {
-	addr, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/0.0.0.0/udp/%s/quic", port))
+	addr, err := ma.NewMultiaddr(fmt.Sprintf("/ip4/0.0.0.0/udp/%s/quic-v1", port))
 	if err != nil {
 		return err
 	}
