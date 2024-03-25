@@ -431,12 +431,9 @@ func (as *AmbientAutoNAT) getPeerToProbe() peer.ID {
 func (as *AmbientAutoNAT) Close() error {
 	as.ctxCancel()
 	if as.service != nil {
-		as.service.Disable()
-	}
-	<-as.backgroundRunning
-	if as.service != nil {
 		return as.service.Close()
 	}
+	<-as.backgroundRunning
 	return nil
 }
 
