@@ -68,6 +68,44 @@ func TestHTTPOverStreams(t *testing.T) {
 	require.Equal(t, "hello", string(body))
 }
 
+func TestHTTPOverStreamsReturnsConnectionClose(t *testing.T) {
+	serverHost, err := libp2p.New(
+		libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"),
+	)
+	require.NoError(t, err)
+
+	httpHost := libp2phttp.Host{StreamHost: serverHost}
+
+	httpHost.SetHTTPHandlerAtPath("/hello", "/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hello"))
+	}))
+
+	// Start server
+	go httpHost.Serve()
+	defer httpHost.Close()
+
+	// Start client
+	clientHost, err := libp2p.New(libp2p.NoListenAddrs)
+	require.NoError(t, err)
+	clientHost.Connect(context.Background(), peer.AddrInfo{
+		ID:    serverHost.ID(),
+		Addrs: serverHost.Addrs(),
+	})
+
+	s, err := clientHost.NewStream(context.Background(), serverHost.ID(), libp2phttp.ProtocolIDForMultistreamSelect)
+	require.NoError(t, err)
+	_, err = s.Write([]byte("GET / HTTP/1.1\r\nHost: \r\n\r\n"))
+	require.NoError(t, err)
+
+	out := make([]byte, 1024)
+	n, err := s.Read(out)
+	if err != io.EOF {
+		require.NoError(t, err)
+	}
+
+	require.Contains(t, strings.ToLower(string(out[:n])), "connection: close")
+}
+
 func TestRoundTrippers(t *testing.T) {
 	serverHost, err := libp2p.New(
 		libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"),
