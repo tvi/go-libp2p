@@ -400,8 +400,6 @@ func (ids *idService) IdentifyWait(c network.Conn) <-chan struct{} {
 			ids.emitters.evtPeerIdentificationFailed.Emit(event.EvtPeerIdentificationFailed{Peer: c.RemotePeer(), Reason: err})
 			return
 		}
-
-		ids.emitters.evtPeerIdentificationCompleted.Emit(event.EvtPeerIdentificationCompleted{Peer: c.RemotePeer()})
 	}()
 
 	return e.IdentifyWaitChan
@@ -763,6 +761,7 @@ func (ids *idService) consumeMessage(mes *pb.Identify, c network.Conn, isPush bo
 		signedAddrs, err := ids.consumeSignedPeerRecord(c.RemotePeer(), signedPeerRecord)
 		if err != nil {
 			log.Debugf("failed to consume signed peer record: %s", err)
+			signedPeerRecord = nil
 		} else {
 			addrs = signedAddrs
 		}
@@ -786,6 +785,15 @@ func (ids *idService) consumeMessage(mes *pb.Identify, c network.Conn, isPush bo
 
 	// get the key from the other side. we may not have it (no-auth transport)
 	ids.consumeReceivedPubKey(c, mes.PublicKey)
+
+	ids.emitters.evtPeerIdentificationCompleted.Emit(event.EvtPeerIdentificationCompleted{
+		Peer:             c.RemotePeer(),
+		Conn:             c,
+		ListenAddrs:      lmaddrs,
+		Protocols:        mesProtocols,
+		SignedPeerRecord: signedPeerRecord,
+	})
+
 }
 
 func (ids *idService) consumeSignedPeerRecord(p peer.ID, signedPeerRecord *record.Envelope) ([]ma.Multiaddr, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -200,10 +201,32 @@ func TestIDService(t *testing.T) {
 
 	// test that we received the "identify completed" event.
 	select {
-	case <-sub.Out():
+	case evtAny := <-sub.Out():
+		assertCorrectEvtPeerIdentificationCompleted(t, evtAny, h2)
 	case <-time.After(3 * time.Second):
 		t.Fatalf("expected EvtPeerIdentificationCompleted event within 10 seconds; none received")
 	}
+}
+
+func assertCorrectEvtPeerIdentificationCompleted(t *testing.T, evtAny interface{}, other host.Host) {
+	t.Helper()
+	evt := evtAny.(event.EvtPeerIdentificationCompleted)
+	require.NotNil(t, evt.Conn)
+	require.Equal(t, other.ID(), evt.Peer)
+	require.Equal(t, other.Addrs(), evt.ListenAddrs)
+	otherProtos := other.Mux().Protocols()
+	slices.Sort(otherProtos)
+	evtProtos := evt.Protocols
+	slices.Sort(evtProtos)
+	require.Equal(t, otherProtos, evtProtos)
+	idFromSignedRecord, err := peer.IDFromPublicKey(evt.SignedPeerRecord.PublicKey)
+	require.NoError(t, err)
+	require.Equal(t, other.ID(), idFromSignedRecord)
+	require.Equal(t, peer.PeerRecordEnvelopePayloadType, evt.SignedPeerRecord.PayloadType)
+	var peerRecord peer.PeerRecord
+	evt.SignedPeerRecord.TypedRecord(&peerRecord)
+	require.Equal(t, other.ID(), peerRecord.PeerID)
+	require.Equal(t, other.Addrs(), peerRecord.Addrs)
 }
 
 func TestProtoMatching(t *testing.T) {
@@ -665,7 +688,8 @@ func TestLargeIdentifyMessage(t *testing.T) {
 
 	// test that we received the "identify completed" event.
 	select {
-	case <-sub.Out():
+	case evtAny := <-sub.Out():
+		assertCorrectEvtPeerIdentificationCompleted(t, evtAny, h2)
 	case <-time.After(3 * time.Second):
 		t.Fatalf("expected EvtPeerIdentificationCompleted event within 3 seconds; none received")
 	}
