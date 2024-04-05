@@ -213,7 +213,18 @@ func assertCorrectEvtPeerIdentificationCompleted(t *testing.T, evtAny interface{
 	evt := evtAny.(event.EvtPeerIdentificationCompleted)
 	require.NotNil(t, evt.Conn)
 	require.Equal(t, other.ID(), evt.Peer)
-	require.Equal(t, other.Addrs(), evt.ListenAddrs)
+
+	require.Equal(t, len(other.Addrs()), len(evt.ListenAddrs))
+	if len(other.Addrs()) == len(evt.ListenAddrs) {
+		otherAddrsStrings := make([]string, len(other.Addrs()))
+		evtAddrStrings := make([]string, len(evt.ListenAddrs))
+		for i, a := range other.Addrs() {
+			otherAddrsStrings[i] = a.String()
+			evtAddrStrings[i] = evt.ListenAddrs[i].String()
+		}
+		require.Equal(t, otherAddrsStrings, evtAddrStrings)
+	}
+
 	otherProtos := other.Mux().Protocols()
 	slices.Sort(otherProtos)
 	evtProtos := evt.Protocols
