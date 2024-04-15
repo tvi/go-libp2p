@@ -24,6 +24,17 @@ type EvtPeerIdentificationCompleted struct {
 
 	// SignedPeerRecord is the provided signed peer record of the peer. May be nil.
 	SignedPeerRecord *record.Envelope
+
+	// AgentVersion is like a UserAgent string in browsers, or client version in
+	// bittorrent includes the client name and client.
+	AgentVersion string
+
+	// ProtocolVersion is the protocolVersion field in the identify message
+	ProtocolVersion string
+
+	// ObservedAddr is the our side's connection address as observed by the
+	// peer. This is not verified, the peer could return anything here.
+	ObservedAddr multiaddr.Multiaddr
 }
 
 // EvtPeerIdentificationFailed is emitted when the initial identification round for a peer failed.

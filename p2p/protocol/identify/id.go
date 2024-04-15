@@ -709,8 +709,16 @@ func (ids *idService) consumeMessage(mes *pb.Identify, c network.Conn, isPush bo
 		})
 	}
 
-	// mes.ObservedAddr
-	ids.consumeObservedAddress(mes.GetObservedAddr(), c)
+	obsAddr, err := ma.NewMultiaddrBytes(mes.GetObservedAddr())
+	if err != nil {
+		log.Debugf("error parsing received observed addr for %s: %s", c, err)
+		obsAddr = nil
+	}
+
+	if obsAddr != nil {
+		// TODO refactor this to use the emitted events instead of having this func call explicitly.
+		ids.observedAddrs.Record(c, obsAddr)
+	}
 
 	// mes.ListenAddrs
 	laddrs := mes.GetListenAddrs()
@@ -792,6 +800,9 @@ func (ids *idService) consumeMessage(mes *pb.Identify, c network.Conn, isPush bo
 		ListenAddrs:      lmaddrs,
 		Protocols:        mesProtocols,
 		SignedPeerRecord: signedPeerRecord,
+		ObservedAddr:     obsAddr,
+		ProtocolVersion:  pv,
+		AgentVersion:     av,
 	})
 
 }
@@ -925,20 +936,6 @@ func HasConsistentTransport(a ma.Multiaddr, green []ma.Multiaddr) bool {
 	}
 
 	return false
-}
-
-func (ids *idService) consumeObservedAddress(observed []byte, c network.Conn) {
-	if observed == nil {
-		return
-	}
-
-	maddr, err := ma.NewMultiaddrBytes(observed)
-	if err != nil {
-		log.Debugf("error parsing received observed addr for %s: %s", c, err)
-		return
-	}
-
-	ids.observedAddrs.Record(c, maddr)
 }
 
 // addConnWithLock assuems caller holds the connsMu lock
