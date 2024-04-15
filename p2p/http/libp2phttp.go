@@ -422,6 +422,9 @@ func (rt *streamRoundTripper) RoundTrip(r *http.Request) (*http.Response, error)
 		return nil, err
 	}
 
+	// Write connection: close header to ensure the stream is closed after the response
+	r.Header.Add("connection", "close")
+
 	go func() {
 		defer s.CloseWrite()
 		r.Write(s)

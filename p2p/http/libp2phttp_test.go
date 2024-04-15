@@ -68,6 +68,46 @@ func TestHTTPOverStreams(t *testing.T) {
 	require.Equal(t, "hello", string(body))
 }
 
+func TestHTTPOverStreamsSendsConnectionClose(t *testing.T) {
+	serverHost, err := libp2p.New(
+		libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"),
+	)
+	require.NoError(t, err)
+
+	httpHost := libp2phttp.Host{StreamHost: serverHost}
+
+	connectionHeaderVal := make(chan string, 1)
+	httpHost.SetHTTPHandlerAtPath("/hello", "/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hello"))
+		connectionHeaderVal <- r.Header.Get("Connection")
+	}))
+
+	// Start server
+	go httpHost.Serve()
+	defer httpHost.Close()
+
+	// run client
+	clientHost, err := libp2p.New(libp2p.NoListenAddrs)
+	require.NoError(t, err)
+	clientHost.Connect(context.Background(), peer.AddrInfo{
+		ID:    serverHost.ID(),
+		Addrs: serverHost.Addrs(),
+	})
+	clientHttpHost := libp2phttp.Host{StreamHost: clientHost}
+	rt, err := clientHttpHost.NewConstrainedRoundTripper(peer.AddrInfo{ID: serverHost.ID()})
+	require.NoError(t, err)
+	client := &http.Client{Transport: rt}
+	_, err = client.Get("/")
+	require.NoError(t, err)
+
+	select {
+	case val := <-connectionHeaderVal:
+		require.Equal(t, "close", strings.ToLower(val))
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for connection header")
+	}
+}
+
 func TestHTTPOverStreamsReturnsConnectionClose(t *testing.T) {
 	serverHost, err := libp2p.New(
 		libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"),
