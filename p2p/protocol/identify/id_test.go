@@ -222,6 +222,8 @@ func assertCorrectEvtPeerIdentificationCompleted(t *testing.T, evtAny interface{
 			otherAddrsStrings[i] = a.String()
 			evtAddrStrings[i] = evt.ListenAddrs[i].String()
 		}
+		slices.Sort(otherAddrsStrings)
+		slices.Sort(evtAddrStrings)
 		require.Equal(t, otherAddrsStrings, evtAddrStrings)
 	}
 
