@@ -621,20 +621,31 @@ func newWebRTCConnection(settings webrtc.SettingEngine, config webrtc.Configurat
 // IsWebRTCDirectMultiaddr returns whether addr is a /webrtc-direct multiaddr with the count of certhashes
 // in addr
 func IsWebRTCDirectMultiaddr(addr ma.Multiaddr) (bool, int) {
-	components := [2]int{ma.P_UDP, ma.P_WEBRTC_DIRECT}
-	var i int
+	var foundUDP, foundWebRTC bool
 	certHashCount := 0
 	ma.ForEach(addr, func(c ma.Component) bool {
-		if i < len(components) && c.Protocol().Code == components[i] {
-			i++
+		if !foundUDP {
+			if c.Protocol().Code == ma.P_UDP {
+				foundUDP = true
+			}
+			return true
 		}
-		if i == len(components) && c.Protocol().Code == ma.P_CERTHASH {
-			certHashCount++
+		if !foundWebRTC && foundUDP {
+			// protocol after udp must be webrtc-direct
+			if c.Protocol().Code != ma.P_WEBRTC_DIRECT {
+				return false
+			}
+			foundWebRTC = true
+			return true
+		}
+		if foundWebRTC {
+			if c.Protocol().Code == ma.P_CERTHASH {
+				certHashCount++
+			} else {
+				return false
+			}
 		}
 		return true
 	})
-	if i == len(components) {
-		return true, certHashCount
-	}
-	return false, 0
+	return foundUDP && foundWebRTC, certHashCount
 }

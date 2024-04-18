@@ -44,6 +44,7 @@ func TestIsWebRTCDirectMultiaddr(t *testing.T) {
 	invalid := []string{
 		"/ip4/1.2.3.4/tcp/10/",
 		"/ip6/1::3/udp/100/quic-v1/",
+		"/ip4/1.2.3.4/udp/1/quic-v1/webrtc-direct",
 	}
 
 	valid := []struct {
