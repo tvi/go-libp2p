@@ -40,15 +40,12 @@ import (
 	"github.com/libp2p/go-msgio"
 
 	ma "github.com/multiformats/go-multiaddr"
-	mafmt "github.com/multiformats/go-multiaddr-fmt"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multihash"
 
 	"github.com/pion/datachannel"
 	"github.com/pion/webrtc/v3"
 )
-
-var dialMatcher = mafmt.And(mafmt.UDP, mafmt.Base(ma.P_WEBRTC_DIRECT), mafmt.Base(ma.P_CERTHASH))
 
 var webrtcComponent *ma.Component
 
@@ -179,7 +176,8 @@ func (t *WebRTCTransport) Proxy() bool {
 }
 
 func (t *WebRTCTransport) CanDial(addr ma.Multiaddr) bool {
-	return dialMatcher.Matches(addr)
+	isValid, n := IsWebRTCDirectMultiaddr(addr)
+	return isValid && n > 0
 }
 
 // Listen returns a listener for addr.
@@ -514,6 +512,24 @@ func (t *WebRTCTransport) noiseHandshake(ctx context.Context, pc *webrtc.PeerCon
 	return secureConn.RemotePublicKey(), nil
 }
 
+func (t *WebRTCTransport) AddCertHashes(addr ma.Multiaddr) (ma.Multiaddr, bool) {
+	listenerFingerprint, err := t.getCertificateFingerprint()
+	if err != nil {
+		return nil, false
+	}
+
+	encodedLocalFingerprint, err := encodeDTLSFingerprint(listenerFingerprint)
+	if err != nil {
+		return nil, false
+	}
+
+	certComp, err := ma.NewComponent(ma.ProtocolWithCode(ma.P_CERTHASH).Name, encodedLocalFingerprint)
+	if err != nil {
+		return nil, false
+	}
+	return addr.Encapsulate(certComp), true
+}
+
 type netConnWrapper struct {
 	*stream
 }
@@ -600,4 +616,25 @@ func newWebRTCConnection(settings webrtc.SettingEngine, config webrtc.Configurat
 		HandshakeDataChannel: handshakeDataChannel,
 		IncomingDataChannels: incomingDataChannels,
 	}, nil
+}
+
+// IsWebRTCDirectMultiaddr returns whether addr is a /webrtc-direct multiaddr with the count of certhashes
+// in addr
+func IsWebRTCDirectMultiaddr(addr ma.Multiaddr) (bool, int) {
+	components := [2]int{ma.P_UDP, ma.P_WEBRTC_DIRECT}
+	var i int
+	certHashCount := 0
+	ma.ForEach(addr, func(c ma.Component) bool {
+		if i < len(components) && c.Protocol().Code == components[i] {
+			i++
+		}
+		if i == len(components) && c.Protocol().Code == ma.P_CERTHASH {
+			certHashCount++
+		}
+		return true
+	})
+	if i == len(components) {
+		return true, certHashCount
+	}
+	return false, 0
 }
