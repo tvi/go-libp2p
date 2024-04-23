@@ -24,6 +24,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/host/autonat"
 	"github.com/libp2p/go-libp2p/p2p/host/autorelay"
 	bhost "github.com/libp2p/go-libp2p/p2p/host/basic"
+	blankhost "github.com/libp2p/go-libp2p/p2p/host/blank"
 	"github.com/libp2p/go-libp2p/p2p/host/eventbus"
 	"github.com/libp2p/go-libp2p/p2p/host/peerstore/pstoremem"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
@@ -131,6 +132,8 @@ type Config struct {
 	SwarmOpts []swarm.Option
 
 	DisableIdentifyAddressDiscovery bool
+
+	DisableAutoNATv2 bool
 }
 
 func (cfg *Config) makeSwarm(eventBus event.Bus, enableMetrics bool) (*swarm.Swarm, error) {
@@ -191,6 +194,76 @@ func (cfg *Config) makeSwarm(eventBus event.Bus, enableMetrics bool) (*swarm.Swa
 	}
 	// TODO: Make the swarm implementation configurable.
 	return swarm.NewSwarm(pid, cfg.Peerstore, eventBus, opts...)
+}
+
+func (cfg *Config) makeAutoNATHost() (host.Host, error) {
+	autonatPrivKey, _, err := crypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	ps, err := pstoremem.NewPeerstore()
+	if err != nil {
+		return nil, err
+	}
+
+	autoNatCfg := Config{
+		Transports:         cfg.Transports,
+		Muxers:             cfg.Muxers,
+		SecurityTransports: cfg.SecurityTransports,
+		Insecure:           cfg.Insecure,
+		PSK:                cfg.PSK,
+		ConnectionGater:    cfg.ConnectionGater,
+		Reporter:           cfg.Reporter,
+		PeerKey:            autonatPrivKey,
+		Peerstore:          ps,
+		DialRanker:         swarm.NoDelayDialRanker,
+		SwarmOpts: []swarm.Option{
+			// Disable black hole detection on autonat dialers
+			// It is better to attempt a dial and fail for AutoNAT use cases
+			swarm.WithUDPBlackHoleConfig(false, 0, 0),
+			swarm.WithIPv6BlackHoleConfig(false, 0, 0),
+		},
+	}
+	fxopts, err := autoNatCfg.addTransports()
+	if err != nil {
+		return nil, err
+	}
+	var dialerHost host.Host
+	fxopts = append(fxopts,
+		fx.Provide(eventbus.NewBus),
+		fx.Provide(func(lifecycle fx.Lifecycle, b event.Bus) (*swarm.Swarm, error) {
+			lifecycle.Append(fx.Hook{
+				OnStop: func(context.Context) error {
+					return ps.Close()
+				}})
+			sw, err := autoNatCfg.makeSwarm(b, false)
+			return sw, err
+		}),
+		fx.Provide(func(sw *swarm.Swarm) *blankhost.BlankHost {
+			return blankhost.NewBlankHost(sw)
+		}),
+		fx.Provide(func(bh *blankhost.BlankHost) host.Host {
+			return bh
+		}),
+		fx.Provide(func() crypto.PrivKey { return autonatPrivKey }),
+		fx.Provide(func(bh host.Host) peer.ID { return bh.ID() }),
+		fx.Invoke(func(bh *blankhost.BlankHost) {
+			dialerHost = bh
+		}),
+	)
+	app := fx.New(fxopts...)
+	if err := app.Err(); err != nil {
+		return nil, err
+	}
+	err = app.Start(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		<-dialerHost.Network().(*swarm.Swarm).Done()
+		app.Stop(context.Background())
+	}()
+	return dialerHost, nil
 }
 
 func (cfg *Config) addTransports() ([]fx.Option, error) {
@@ -291,6 +364,14 @@ func (cfg *Config) addTransports() ([]fx.Option, error) {
 }
 
 func (cfg *Config) newBasicHost(swrm *swarm.Swarm, eventBus event.Bus) (*bhost.BasicHost, error) {
+	var autonatv2Dialer host.Host
+	if !cfg.DisableAutoNATv2 {
+		ah, err := cfg.makeAutoNATHost()
+		if err != nil {
+			return nil, err
+		}
+		autonatv2Dialer = ah
+	}
 	h, err := bhost.NewHost(swrm, &bhost.HostOpts{
 		EventBus:                        eventBus,
 		ConnManager:                     cfg.ConnManager,
@@ -306,6 +387,8 @@ func (cfg *Config) newBasicHost(swrm *swarm.Swarm, eventBus event.Bus) (*bhost.B
 		EnableMetrics:                   !cfg.DisableMetrics,
 		PrometheusRegisterer:            cfg.PrometheusRegisterer,
 		DisableIdentifyAddressDiscovery: cfg.DisableIdentifyAddressDiscovery,
+		EnableAutoNATv2:                 !cfg.DisableAutoNATv2,
+		AutoNATv2Dialer:                 autonatv2Dialer,
 	})
 	if err != nil {
 		return nil, err

@@ -112,7 +112,7 @@ func WithDialRanker(d network.DialRanker) Option {
 	}
 }
 
-// WithUDPBlackHoleConfig configures swarm to use c as the config for UDP black hole detection
+// WithUDPBlackHoleConfig configures swarm to use the provided config for UDP black hole detection
 // n is the size of the sliding window used to evaluate black hole state
 // min is the minimum number of successes out of n required to not block requests
 func WithUDPBlackHoleConfig(enabled bool, n, min int) Option {
@@ -122,7 +122,7 @@ func WithUDPBlackHoleConfig(enabled bool, n, min int) Option {
 	}
 }
 
-// WithIPv6BlackHoleConfig configures swarm to use c as the config for IPv6 black hole detection
+// WithIPv6BlackHoleConfig configures swarm to use the provided config for IPv6 black hole detection
 // n is the size of the sliding window used to evaluate black hole state
 // min is the minimum number of successes out of n required to not block requests
 func WithIPv6BlackHoleConfig(enabled bool, n, min int) Option {
