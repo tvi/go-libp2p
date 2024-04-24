@@ -48,10 +48,10 @@ func Wrap(h host.Host, r Routing) *RoutedHost {
 func (rh *RoutedHost) Connect(ctx context.Context, pi peer.AddrInfo) error {
 	// first, check if we're already connected unless force direct dial.
 	forceDirect, _ := network.GetForceDirectDial(ctx)
-	canUseTransient, _ := network.GetUseTransient(ctx)
+	canUseLimitedConn, _ := network.GetAllowLimitedConn(ctx)
 	if !forceDirect {
 		connectedness := rh.Network().Connectedness(pi.ID)
-		if connectedness == network.Connected || (canUseTransient && connectedness == network.Limited) {
+		if connectedness == network.Connected || (canUseLimitedConn && connectedness == network.Limited) {
 			return nil
 		}
 	}

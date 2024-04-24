@@ -118,8 +118,10 @@ type Stats struct {
 	Direction Direction
 	// Opened is the timestamp when this connection was opened.
 	Opened time.Time
-	// Transient indicates that this connection is transient and may be closed soon.
-	Transient bool
+	// Limited indicates that this connection is Limited. It maybe limited by
+	// bytes or time. In practice, this is a connection formed over a circuit v2
+	// relay.
+	Limited bool
 	// Extra stores additional metadata about this connection.
 	Extra map[interface{}]interface{}
 }

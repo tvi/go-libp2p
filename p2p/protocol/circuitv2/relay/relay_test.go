@@ -154,7 +154,7 @@ func TestBasicRelay(t *testing.T) {
 	if len(conns) != 1 {
 		t.Fatalf("expected 1 connection, but got %d", len(conns))
 	}
-	if !conns[0].Stat().Transient {
+	if !conns[0].Stat().Limited {
 		t.Fatal("expected transient connection")
 	}
 
@@ -229,7 +229,7 @@ func TestRelayLimitTime(t *testing.T) {
 	if len(conns) != 1 {
 		t.Fatalf("expected 1 connection, but got %d", len(conns))
 	}
-	if !conns[0].Stat().Transient {
+	if !conns[0].Stat().Limited {
 		t.Fatal("expected transient connection")
 	}
 
@@ -315,7 +315,7 @@ func TestRelayLimitData(t *testing.T) {
 	if len(conns) != 1 {
 		t.Fatalf("expected 1 connection, but got %d", len(conns))
 	}
-	if !conns[0].Stat().Transient {
+	if !conns[0].Stat().Limited {
 		t.Fatal("expected transient connection")
 	}
 
