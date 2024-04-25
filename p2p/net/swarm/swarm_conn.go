@@ -194,8 +194,8 @@ func (c *Conn) Stat() network.ConnStats {
 // NewStream returns a new Stream from this connection
 func (c *Conn) NewStream(ctx context.Context) (network.Stream, error) {
 	if c.Stat().Limited {
-		if useTransient, _ := network.GetUseTransient(ctx); !useTransient {
-			return nil, network.ErrTransientConn
+		if useLimited, _ := network.GetAllowLimitedConn(ctx); !useLimited {
+			return nil, network.ErrLimitedConn
 		}
 	}
 

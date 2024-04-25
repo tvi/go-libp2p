@@ -408,7 +408,7 @@ func (ids *idService) IdentifyWait(c network.Conn) <-chan struct{} {
 func (ids *idService) identifyConn(c network.Conn) error {
 	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
 	defer cancel()
-	s, err := c.NewStream(network.WithUseTransient(ctx, "identify"))
+	s, err := c.NewStream(network.WithAllowLimitedConn(ctx, "identify"))
 	if err != nil {
 		log.Debugw("error opening identify stream", "peer", c.RemotePeer(), "error", err)
 		return err
