@@ -156,7 +156,8 @@ type Swarm struct {
 
 	conns struct {
 		sync.RWMutex
-		m map[peer.ID][]*Conn
+		m             map[peer.ID][]*Conn
+		connectedness map[peer.ID]network.Connectedness
 	}
 
 	listeners struct {
@@ -234,6 +235,7 @@ func NewSwarm(local peer.ID, peers peerstore.Peerstore, eventBus event.Bus, opts
 	}
 
 	s.conns.m = make(map[peer.ID][]*Conn)
+	s.conns.connectedness = make(map[peer.ID]network.Connectedness)
 	s.listeners.m = make(map[transport.Listener]struct{})
 	s.transports.m = make(map[int]transport.Transport)
 	s.notifs.m = make(map[network.Notifiee]struct{})
@@ -282,6 +284,7 @@ func (s *Swarm) close() {
 	s.conns.Lock()
 	conns := s.conns.m
 	s.conns.m = nil
+	s.conns.connectedness = nil
 	s.conns.Unlock()
 
 	// Lots of goroutines but we might as well do this in parallel. We want to shut down as fast as
@@ -390,11 +393,12 @@ func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn,
 		return nil, ErrSwarmClosed
 	}
 
-	oldState := s.connectednessUnlocked(p)
+	oldState := s.conns.connectedness[p]
 
 	c.streams.m = make(map[*Stream]struct{})
 	s.conns.m[p] = append(s.conns.m[p], c)
 	newState := s.connectednessUnlocked(p)
+	s.conns.connectedness[p] = newState
 
 	// Add two swarm refs:
 	// * One will be decremented after the close notifications fire in Conn.doClose
@@ -678,33 +682,8 @@ func (s *Swarm) connectednessUnlocked(p peer.ID) network.Connectedness {
 	}
 	if haveLimited {
 		return network.Limited
-	} else {
-		return network.NotConnected
 	}
-}
-
-// connectednessWithClosedConnUnlocked returns connectedness to peer assuming that closedConn is still
-// connected.
-// This is useful when the peer closes the Connection and we are interested in knowing what the old
-// connectedness before closing of the connection was.
-func (s *Swarm) connectednessWithClosedConnUnlocked(p peer.ID, closedConn *Conn) network.Connectedness {
-	var haveLimited bool
-	for _, c := range s.conns.m[p] {
-		if c.IsClosed() && c != closedConn {
-			// These will be garbage collected soon
-			continue
-		}
-		if c.Stat().Limited {
-			haveLimited = true
-		} else {
-			return network.Connected
-		}
-	}
-	if haveLimited {
-		return network.Limited
-	} else {
-		return network.NotConnected
-	}
+	return network.NotConnected
 }
 
 // Conns returns a slice of all connections.
@@ -801,12 +780,8 @@ func (s *Swarm) removeConn(c *Conn) {
 
 	s.conns.Lock()
 
+	oldState := s.conns.connectedness[p]
 	cs := s.conns.m[p]
-
-	// To get an accurate oldState we need to consider the impact of the recently
-	// closed connection on connectedness
-	oldState := s.connectednessWithClosedConnUnlocked(p, c)
-
 	if len(cs) == 1 {
 		delete(s.conns.m, p)
 	} else {
@@ -824,6 +799,13 @@ func (s *Swarm) removeConn(c *Conn) {
 	}
 
 	newState := s.connectednessUnlocked(p)
+	if s.conns.connectedness != nil { // swarm is not closing
+		if newState == network.NotConnected {
+			delete(s.conns.connectedness, p)
+		} else {
+			s.conns.connectedness[p] = newState
+		}
+	}
 
 	s.conns.Unlock()
 
