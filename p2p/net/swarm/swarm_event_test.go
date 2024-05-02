@@ -113,3 +113,91 @@ func TestNoDeadlockWhenConsumingConnectednessEvents(t *testing.T) {
 
 	// The test should finish without deadlocking
 }
+
+func TestConnectednessEvents(t *testing.T) {
+	s1, sub1 := newSwarmWithSubscription(t)
+	const N = 100
+	peers := make([]*Swarm, N)
+	for i := 0; i < N; i++ {
+		peers[i] = swarmt.GenSwarm(t)
+	}
+
+	// First check all connected events
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < N; i++ {
+			e := <-sub1.Out()
+			evt, ok := e.(event.EvtPeerConnectednessChanged)
+			if !ok {
+				t.Error("invalid event received", e)
+				return
+			}
+			if evt.Connectedness != network.Connected {
+				t.Errorf("invalid event received: expected: Connected, got: %s", evt)
+				return
+			}
+		}
+	}()
+	for i := 0; i < N; i++ {
+		s1.Peerstore().AddAddrs(peers[i].LocalPeer(), []ma.Multiaddr{peers[i].ListenAddresses()[0]}, time.Hour)
+		_, err := s1.DialPeer(context.Background(), peers[i].LocalPeer())
+		require.NoError(t, err)
+	}
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected all connectedness events to be completed")
+	}
+
+	// Disconnect some peers
+	done = make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < N/2; i++ {
+			e := <-sub1.Out()
+			evt, ok := e.(event.EvtPeerConnectednessChanged)
+			if !ok {
+				t.Error("invalid event received", e)
+				return
+			}
+			if evt.Connectedness != network.NotConnected {
+				t.Errorf("invalid event received: expected: NotConnected, got: %s", evt)
+				return
+			}
+		}
+	}()
+	for i := 0; i < N/2; i++ {
+		err := s1.ClosePeer(peers[i].LocalPeer())
+		require.NoError(t, err)
+	}
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected all disconnected events to be completed")
+	}
+
+	// Check for disconnected events on swarm close
+	done = make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := N / 2; i < N; i++ {
+			e := <-sub1.Out()
+			evt, ok := e.(event.EvtPeerConnectednessChanged)
+			if !ok {
+				t.Error("invalid event received", e)
+				return
+			}
+			if evt.Connectedness != network.NotConnected {
+				t.Errorf("invalid event received: expected: NotConnected, got: %s", evt)
+				return
+			}
+		}
+	}()
+	s1.Close()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected all disconnected events after swarm close to be completed")
+	}
+}

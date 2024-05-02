@@ -273,8 +273,6 @@ func (s *Swarm) Done() <-chan struct{} {
 func (s *Swarm) close() {
 	s.ctxCancel()
 
-	s.emitter.Close()
-
 	// Prevents new connections and/or listeners from being added to the swarm.
 	s.listeners.Lock()
 	listeners := s.listeners.m
@@ -284,7 +282,6 @@ func (s *Swarm) close() {
 	s.conns.Lock()
 	conns := s.conns.m
 	s.conns.m = nil
-	s.conns.connectedness = nil
 	s.conns.Unlock()
 
 	// Lots of goroutines but we might as well do this in parallel. We want to shut down as fast as
@@ -311,6 +308,13 @@ func (s *Swarm) close() {
 
 	// Wait for everything to finish.
 	s.refs.Wait()
+	s.emitter.Close()
+
+	// Remove the connectedness map only after we have closed the connection and sent all the disconnection
+	// events
+	s.conns.Lock()
+	s.conns.connectedness = nil
+	s.conns.Unlock()
 
 	// Now close out any transports (if necessary). Do this after closing
 	// all connections/listeners.
@@ -799,14 +803,13 @@ func (s *Swarm) removeConn(c *Conn) {
 	}
 
 	newState := s.connectednessUnlocked(p)
-	if s.conns.connectedness != nil { // swarm is not closing
+	if s.conns.connectedness != nil { // This shoud always be non nil but a check doesn't hurt
 		if newState == network.NotConnected {
 			delete(s.conns.connectedness, p)
 		} else {
 			s.conns.connectedness[p] = newState
 		}
 	}
-
 	s.conns.Unlock()
 
 	if oldState != newState {
