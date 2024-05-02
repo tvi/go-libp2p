@@ -2,7 +2,6 @@ package swarm_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -68,6 +67,10 @@ func TestConnectednessEventsSingleConn(t *testing.T) {
 }
 
 func TestNoDeadlockWhenConsumingConnectednessEvents(t *testing.T) {
+	ctx := context.Background()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	dialerEventBus := eventbus.NewBus()
 	dialer := swarmt.GenSwarm(t, swarmt.OptDialOnly, swarmt.EventBus(dialerEventBus))
 	defer dialer.Close()
@@ -86,10 +89,6 @@ func TestNoDeadlockWhenConsumingConnectednessEvents(t *testing.T) {
 
 	sub, err := dialerEventBus.Subscribe(new(event.EvtPeerConnectednessChanged))
 	require.NoError(t, err)
-
-	ctx := context.Background()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	// A slow consumer
 	go func() {
@@ -229,7 +228,6 @@ func TestConnectednessEventDeadlock(t *testing.T) {
 				continue
 			}
 			count++
-			fmt.Println(count)
 			s1.ClosePeer(evt.Peer)
 		}
 	}()
