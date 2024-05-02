@@ -2,6 +2,7 @@ package swarm_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -199,5 +201,48 @@ func TestConnectednessEvents(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("expected all disconnected events after swarm close to be completed")
+	}
+}
+
+func TestConnectednessEventDeadlock(t *testing.T) {
+	s1, sub1 := newSwarmWithSubscription(t)
+	const N = 100
+	peers := make([]*Swarm, N)
+	for i := 0; i < N; i++ {
+		peers[i] = swarmt.GenSwarm(t)
+	}
+
+	// First check all connected events
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		count := 0
+		for count < N {
+			e := <-sub1.Out()
+			// sleep to simulate a slow consumer
+			evt, ok := e.(event.EvtPeerConnectednessChanged)
+			if !ok {
+				t.Error("invalid event received", e)
+				return
+			}
+			if evt.Connectedness != network.Connected {
+				continue
+			}
+			count++
+			fmt.Println(count)
+			s1.ClosePeer(evt.Peer)
+		}
+	}()
+	for i := 0; i < N; i++ {
+		s1.Peerstore().AddAddrs(peers[i].LocalPeer(), []ma.Multiaddr{peers[i].ListenAddresses()[0]}, time.Hour)
+		go func(i int) {
+			_, err := s1.DialPeer(context.Background(), peers[i].LocalPeer())
+			assert.NoError(t, err)
+		}(i)
+	}
+	select {
+	case <-done:
+	case <-time.After(100 * time.Second):
+		t.Fatal("expected all connectedness events to be completed")
 	}
 }

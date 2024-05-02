@@ -813,10 +813,12 @@ func (s *Swarm) removeConn(c *Conn) {
 	s.conns.Unlock()
 
 	if oldState != newState {
+		fmt.Println("going to emit event", newState)
 		s.emitter.Emit(event.EvtPeerConnectednessChanged{
 			Peer:          p,
 			Connectedness: newState,
 		})
+		fmt.Println("emitted event", newState)
 	}
 }
 
