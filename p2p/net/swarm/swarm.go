@@ -144,9 +144,7 @@ type Swarm struct {
 	// down before continuing.
 	refs sync.WaitGroup
 
-	emitter                  event.Emitter
-	connectednessEventCh     chan struct{}
-	connectednessEmitterDone chan struct{}
+	emitter event.Emitter
 
 	rcmgr network.ResourceManager
 
@@ -158,8 +156,7 @@ type Swarm struct {
 
 	conns struct {
 		sync.RWMutex
-		m                   map[peer.ID][]*Conn
-		connectednessEvents chan peer.ID
+		m map[peer.ID][]*Conn
 	}
 
 	listeners struct {
@@ -206,9 +203,10 @@ type Swarm struct {
 
 	dialRanker network.DialRanker
 
-	udpBlackHoleConfig  blackHoleConfig
-	ipv6BlackHoleConfig blackHoleConfig
-	bhd                 *blackHoleDetector
+	udpBlackHoleConfig        blackHoleConfig
+	ipv6BlackHoleConfig       blackHoleConfig
+	bhd                       *blackHoleDetector
+	connectednessEventEmitter *connectednessEventEmitter
 }
 
 // NewSwarm constructs a Swarm.
@@ -219,17 +217,15 @@ func NewSwarm(local peer.ID, peers peerstore.Peerstore, eventBus event.Bus, opts
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Swarm{
-		local:                    local,
-		peers:                    peers,
-		emitter:                  emitter,
-		connectednessEventCh:     make(chan struct{}, 1),
-		connectednessEmitterDone: make(chan struct{}),
-		ctx:                      ctx,
-		ctxCancel:                cancel,
-		dialTimeout:              defaultDialTimeout,
-		dialTimeoutLocal:         defaultDialTimeoutLocal,
-		maResolver:               madns.DefaultResolver,
-		dialRanker:               DefaultDialRanker,
+		local:            local,
+		peers:            peers,
+		emitter:          emitter,
+		ctx:              ctx,
+		ctxCancel:        cancel,
+		dialTimeout:      defaultDialTimeout,
+		dialTimeoutLocal: defaultDialTimeoutLocal,
+		maResolver:       madns.DefaultResolver,
+		dialRanker:       DefaultDialRanker,
 
 		// A black hole is a binary property. On a network if UDP dials are blocked or there is
 		// no IPv6 connectivity, all dials will fail. So a low success rate of 5 out 100 dials
@@ -239,11 +235,11 @@ func NewSwarm(local peer.ID, peers peerstore.Peerstore, eventBus event.Bus, opts
 	}
 
 	s.conns.m = make(map[peer.ID][]*Conn)
-	s.conns.connectednessEvents = make(chan peer.ID, 32)
 	s.listeners.m = make(map[transport.Listener]struct{})
 	s.transports.m = make(map[int]transport.Transport)
 	s.notifs.m = make(map[network.Notifiee]struct{})
 	s.directConnNotifs.m = make(map[peer.ID][]chan struct{})
+	s.connectednessEventEmitter = newConnectednessEventEmitter(s.Connectedness, emitter)
 
 	for _, opt := range opts {
 		if err := opt(s); err != nil {
@@ -260,7 +256,6 @@ func NewSwarm(local peer.ID, peers peerstore.Peerstore, eventBus event.Bus, opts
 	s.backf.init(s.ctx)
 
 	s.bhd = newBlackHoleDetector(s.udpBlackHoleConfig, s.ipv6BlackHoleConfig, s.metricsTracer)
-	go s.connectednessEventEmitter()
 	return s, nil
 }
 
@@ -312,8 +307,7 @@ func (s *Swarm) close() {
 
 	// Wait for everything to finish.
 	s.refs.Wait()
-	close(s.conns.connectednessEvents)
-	<-s.connectednessEmitterDone
+	s.connectednessEventEmitter.Close()
 	s.emitter.Close()
 
 	// Now close out any transports (if necessary). Do this after closing
@@ -344,7 +338,7 @@ func (s *Swarm) close() {
 	wg.Wait()
 }
 
-func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn, error) {
+func (s *Swarm) addConn(ctx context.Context, tc transport.CapableConn, dir network.Direction) (*Conn, error) {
 	var (
 		p    = tc.RemotePeer()
 		addr = tc.RemoteMultiaddr()
@@ -403,18 +397,15 @@ func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn,
 	// * One will be decremented after the close notifications fire in Conn.doClose
 	// * The other will be decremented when Conn.start exits.
 	s.refs.Add(2)
-
 	// Take the notification lock before releasing the conns lock to block
 	// Disconnect notifications until after the Connect notifications done.
+	// This lock also ensures that swarm.refs.Wait() exits after we have
+	// enqueued the peer connectedness changed notification.
+	// TODO: Fix this fragility by taking a swarm ref for dial worker loop
 	c.notifyLk.Lock()
 	s.conns.Unlock()
 
-	// Block this goroutine till this request is enqueued.
-	// This ensures that there are only a finite number of goroutines that are waiting to send
-	// the connectedness event on the disconnection side in swarm.removeConn.
-	// This is so because the goroutine to enqueue disconnection event can only be started
-	// from either a subscriber or a notifier or after calling c.start
-	s.conns.connectednessEvents <- p
+	s.connectednessEventEmitter.AddConn(p)
 
 	if !isLimited {
 		// Notify goroutines waiting for a direct connection
@@ -429,7 +420,6 @@ func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn,
 		delete(s.directConnNotifs.m, p)
 		s.directConnNotifs.Unlock()
 	}
-
 	s.notifyAll(func(f network.Notifiee) {
 		f.Connected(s, c)
 	})
@@ -777,52 +767,21 @@ func (s *Swarm) removeConn(c *Conn) {
 
 	s.conns.Lock()
 	cs := s.conns.m[p]
-	if len(cs) == 1 {
-		delete(s.conns.m, p)
-	} else {
-		for i, ci := range cs {
-			if ci == c {
-				// NOTE: We're intentionally preserving order.
-				// This way, connections to a peer are always
-				// sorted oldest to newest.
-				copy(cs[i:], cs[i+1:])
-				cs[len(cs)-1] = nil
-				s.conns.m[p] = cs[:len(cs)-1]
-				break
-			}
+	for i, ci := range cs {
+		if ci == c {
+			// NOTE: We're intentionally preserving order.
+			// This way, connections to a peer are always
+			// sorted oldest to newest.
+			copy(cs[i:], cs[i+1:])
+			cs[len(cs)-1] = nil
+			s.conns.m[p] = cs[:len(cs)-1]
+			break
 		}
+	}
+	if len(s.conns.m[p]) == 0 {
+		delete(s.conns.m, p)
 	}
 	s.conns.Unlock()
-	// Do this in a separate go routine to not block the caller.
-	// This ensures that if a event subscriber closes the connection from the subscription goroutine
-	// this doesn't deadlock
-	s.refs.Add(1)
-	go func() {
-		defer s.refs.Done()
-		s.conns.connectednessEvents <- p
-	}()
-}
-
-func (s *Swarm) connectednessEventEmitter() {
-	defer close(s.connectednessEmitterDone)
-	lastConnectednessEvents := make(map[peer.ID]network.Connectedness)
-	for p := range s.conns.connectednessEvents {
-		s.conns.Lock()
-		oldState := lastConnectednessEvents[p]
-		newState := s.connectednessUnlocked(p)
-		if newState != network.NotConnected {
-			lastConnectednessEvents[p] = newState
-		} else {
-			delete(lastConnectednessEvents, p)
-		}
-		s.conns.Unlock()
-		if newState != oldState {
-			s.emitter.Emit(event.EvtPeerConnectednessChanged{
-				Peer:          p,
-				Connectedness: newState,
-			})
-		}
-	}
 }
 
 // String returns a string representation of Network.

@@ -2,6 +2,8 @@ package swarm_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -243,4 +245,68 @@ func TestConnectednessEventDeadlock(t *testing.T) {
 	case <-time.After(100 * time.Second):
 		t.Fatal("expected all connectedness events to be completed")
 	}
+}
+
+func TestConnectednessEventDeadlockWithDial(t *testing.T) {
+	s1, sub1 := newSwarmWithSubscription(t)
+	const N = 200
+	peers := make([]*Swarm, N)
+	for i := 0; i < N; i++ {
+		peers[i] = swarmt.GenSwarm(t)
+	}
+	peers2 := make([]*Swarm, N)
+	for i := 0; i < N; i++ {
+		peers2[i] = swarmt.GenSwarm(t)
+	}
+
+	// First check all connected events
+	done := make(chan struct{})
+	var subWG sync.WaitGroup
+	subWG.Add(1)
+	go func() {
+		defer subWG.Done()
+		count := 0
+		for {
+			var e interface{}
+			select {
+			case e = <-sub1.Out():
+			case <-done:
+				return
+			}
+			// sleep to simulate a slow consumer
+			evt, ok := e.(event.EvtPeerConnectednessChanged)
+			if !ok {
+				t.Error("invalid event received", e)
+				return
+			}
+			if evt.Connectedness != network.Connected {
+				continue
+			}
+			if count < N {
+				time.Sleep(10 * time.Millisecond)
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+				s1.Peerstore().AddAddrs(peers2[count].LocalPeer(), []ma.Multiaddr{peers2[count].ListenAddresses()[0]}, time.Hour)
+				s1.DialPeer(ctx, peers2[count].LocalPeer())
+				count++
+				cancel()
+			}
+		}
+	}()
+	var wg sync.WaitGroup
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		s1.Peerstore().AddAddrs(peers[i].LocalPeer(), []ma.Multiaddr{peers[i].ListenAddresses()[0]}, time.Hour)
+		go func(i int) {
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			s1.DialPeer(ctx, peers[i].LocalPeer())
+			cancel()
+			wg.Done()
+		}(i)
+	}
+	wg.Wait()
+	s1.Close()
+
+	close(done)
+	subWG.Wait()
+	fmt.Println("swarm closed")
 }
