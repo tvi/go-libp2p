@@ -31,6 +31,7 @@ var (
 	RecentlyConnectedAddrTTL = time.Minute * 30
 
 	// OwnObservedAddrTTL is used for our own external addresses observed by peers.
+	// Deprecated: observed addresses are maintained till we disconnect from the peer which provided it
 	OwnObservedAddrTTL = time.Minute * 30
 )
 

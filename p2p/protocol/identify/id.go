@@ -159,7 +159,8 @@ type idService struct {
 	addrMu sync.Mutex
 
 	// our own observed addresses.
-	observedAddrs *ObservedAddrManager
+	observedAddrMgr            *ObservedAddrManager
+	disableObservedAddrManager bool
 
 	emitters struct {
 		evtPeerProtocolsUpdated        event.Emitter
@@ -171,6 +172,12 @@ type idService struct {
 		sync.Mutex
 		snapshot identifySnapshot
 	}
+
+	natEmitter *natEmitter
+}
+
+type normalizer interface {
+	NormalizeMultiaddr(ma.Multiaddr) ma.Multiaddr
 }
 
 // NewIDService constructs a new *idService and activates it by
@@ -199,11 +206,27 @@ func NewIDService(h host.Host, opts ...Option) (*idService, error) {
 		metricsTracer:           cfg.metricsTracer,
 	}
 
-	observedAddrs, err := NewObservedAddrManager(h)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create observed address manager: %s", err)
+	var normalize func(ma.Multiaddr) ma.Multiaddr
+	if hn, ok := h.(normalizer); ok {
+		normalize = hn.NormalizeMultiaddr
 	}
-	s.observedAddrs = observedAddrs
+
+	var err error
+	if cfg.disableObservedAddrManager {
+		s.disableObservedAddrManager = true
+	} else {
+		observedAddrs, err := NewObservedAddrManager(h.Network().ListenAddresses,
+			h.Addrs, h.Network().InterfaceListenAddresses, normalize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create observed address manager: %s", err)
+		}
+		natEmitter, err := newNATEmitter(h, observedAddrs, time.Minute)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create nat emitter: %s", err)
+		}
+		s.natEmitter = natEmitter
+		s.observedAddrMgr = observedAddrs
+	}
 
 	s.emitters.evtPeerProtocolsUpdated, err = h.EventBus().Emitter(&event.EvtPeerProtocolsUpdated{})
 	if err != nil {
@@ -341,17 +364,26 @@ func (ids *idService) sendPushes(ctx context.Context) {
 // Close shuts down the idService
 func (ids *idService) Close() error {
 	ids.ctxCancel()
-	ids.observedAddrs.Close()
+	if !ids.disableObservedAddrManager {
+		ids.observedAddrMgr.Close()
+		ids.natEmitter.Close()
+	}
 	ids.refCount.Wait()
 	return nil
 }
 
 func (ids *idService) OwnObservedAddrs() []ma.Multiaddr {
-	return ids.observedAddrs.Addrs()
+	if ids.disableObservedAddrManager {
+		return nil
+	}
+	return ids.observedAddrMgr.Addrs()
 }
 
 func (ids *idService) ObservedAddrsFor(local ma.Multiaddr) []ma.Multiaddr {
-	return ids.observedAddrs.AddrsFor(local)
+	if ids.disableObservedAddrManager {
+		return nil
+	}
+	return ids.observedAddrMgr.AddrsFor(local)
 }
 
 // IdentifyConn runs the Identify protocol on a connection.
@@ -715,9 +747,9 @@ func (ids *idService) consumeMessage(mes *pb.Identify, c network.Conn, isPush bo
 		obsAddr = nil
 	}
 
-	if obsAddr != nil {
+	if obsAddr != nil && !ids.disableObservedAddrManager {
 		// TODO refactor this to use the emitted events instead of having this func call explicitly.
-		ids.observedAddrs.Record(c, obsAddr)
+		ids.observedAddrMgr.Record(c, obsAddr)
 	}
 
 	// mes.ListenAddrs
@@ -981,6 +1013,10 @@ func (nn *netNotifiee) Disconnected(_ network.Network, c network.Conn) {
 	delete(ids.conns, c)
 	ids.connsMu.Unlock()
 
+	if !ids.disableObservedAddrManager {
+		ids.observedAddrMgr.removeConn(c)
+	}
+
 	switch ids.Host.Network().Connectedness(c.RemotePeer()) {
 	case network.Connected, network.Limited:
 		return
@@ -988,8 +1024,8 @@ func (nn *netNotifiee) Disconnected(_ network.Network, c network.Conn) {
 	// Last disconnect.
 	// Undo the setting of addresses to peer.ConnectedAddrTTL we did
 	ids.addrMu.Lock()
-	defer ids.addrMu.Unlock()
 	ids.Host.Peerstore().UpdateAddrs(c.RemotePeer(), peerstore.ConnectedAddrTTL, peerstore.RecentlyConnectedAddrTTL)
+	ids.addrMu.Unlock()
 }
 
 func (nn *netNotifiee) Listen(n network.Network, a ma.Multiaddr)      {}
