@@ -66,13 +66,14 @@ func (c *connectednessEventEmitter) RemoveConn(p peer.ID) {
 	}
 
 	c.removeConnsMx.Lock()
-	// This queue is not unbounded since we block in the AddConn method
-	// So we are adding connections to the swarm only at a rate
-	// the subscriber for our peer connectedness changed events can consume them.
-	// If a lot of open connections are closed at once, increasing the disconnected
-	// event notification rate, the rate of adding connections to the swarm would
-	// proportionately reduce, which would eventually reduce the length of this slice.
+	// This queue is roughly bounded by the total number of added connections we
+	// have. If consumers of connectedness events are slow, we apply
+	// backpressure to AddConn operations.
+	//
+	// We purposefully don't block/backpressure here to avoid deadlocks, since it's
+	// reasonable for a consumer of the event to want to remove a connection.
 	c.removeConns = append(c.removeConns, p)
+
 	c.removeConnsMx.Unlock()
 
 	select {
@@ -111,6 +112,12 @@ func (c *connectednessEventEmitter) runEmitter() {
 	}
 }
 
+// notifyPeer sends the peer connectedness event using the emitter.
+// Use forceNotConnectedEvent = true to send a NotConnected event even if
+// no Connected event was sent for this peer.
+// In case a peer is disconnected before we sent the Connected event, we still
+// send the Disconnected event because a connection to the peer can be observed
+// in such cases.
 func (c *connectednessEventEmitter) notifyPeer(p peer.ID, forceNotConnectedEvent bool) {
 	oldState := c.lastEvent[p]
 	c.lastEvent[p] = c.connectedness(p)
@@ -127,17 +134,10 @@ func (c *connectednessEventEmitter) notifyPeer(p peer.ID, forceNotConnectedEvent
 
 func (c *connectednessEventEmitter) sendConnRemovedNotifications() {
 	c.removeConnsMx.Lock()
-	defer c.removeConnsMx.Unlock()
-	for {
-		if len(c.removeConns) == 0 {
-			return
-		}
-		p := c.removeConns[0]
-		c.removeConns[0] = ""
-		c.removeConns = c.removeConns[1:]
-
-		c.removeConnsMx.Unlock()
+	removeConns := c.removeConns
+	c.removeConns = nil
+	c.removeConnsMx.Unlock()
+	for _, p := range removeConns {
 		c.notifyPeer(p, false)
-		c.removeConnsMx.Lock()
 	}
 }

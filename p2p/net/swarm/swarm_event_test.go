@@ -2,7 +2,6 @@ package swarm_test
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -308,5 +307,4 @@ func TestConnectednessEventDeadlockWithDial(t *testing.T) {
 
 	close(done)
 	subWG.Wait()
-	fmt.Println("swarm closed")
 }

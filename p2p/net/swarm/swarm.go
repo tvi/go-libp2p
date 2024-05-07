@@ -338,7 +338,7 @@ func (s *Swarm) close() {
 	wg.Wait()
 }
 
-func (s *Swarm) addConn(ctx context.Context, tc transport.CapableConn, dir network.Direction) (*Conn, error) {
+func (s *Swarm) addConn(tc transport.CapableConn, dir network.Direction) (*Conn, error) {
 	var (
 		p    = tc.RemotePeer()
 		addr = tc.RemoteMultiaddr()

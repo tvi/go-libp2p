@@ -1,7 +1,6 @@
 package swarm
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -143,7 +142,7 @@ func (s *Swarm) AddListenAddr(a ma.Multiaddr) error {
 			s.refs.Add(1)
 			go func() {
 				defer s.refs.Done()
-				_, err := s.addConn(context.Background(), c, network.DirInbound)
+				_, err := s.addConn(c, network.DirInbound)
 				switch err {
 				case nil:
 				case ErrSwarmClosed:

@@ -340,7 +340,7 @@ loop:
 			ad.expectedTCPUpgradeTime = time.Time{}
 			if res.Conn != nil {
 				// we got a connection, add it to the swarm
-				conn, err := w.s.addConn(ad.ctx, res.Conn, network.DirOutbound)
+				conn, err := w.s.addConn(res.Conn, network.DirOutbound)
 				if err != nil {
 					// oops no, we failed to add it to the swarm
 					res.Conn.Close()
