@@ -316,6 +316,13 @@ func (r *resourceManager) nextStreamId() int64 {
 	return r.streamId
 }
 
+// OpenConnectionNoIP is like OpenConnection, but does not use IP information.
+// Used when we still want to limit the connection by other scopes, but don't
+// have IP information like when we are relaying.
+func (r *resourceManager) OpenConnectionNoIP(dir network.Direction, usefd bool, endpoint multiaddr.Multiaddr) (network.ConnManagementScope, error) {
+	return r.openConnection(dir, usefd, endpoint, netip.Addr{})
+}
+
 func (r *resourceManager) OpenConnection(dir network.Direction, usefd bool, endpoint multiaddr.Multiaddr) (network.ConnManagementScope, error) {
 	ip, err := manet.ToIP(endpoint)
 	if err != nil {
@@ -326,15 +333,21 @@ func (r *resourceManager) OpenConnection(dir network.Direction, usefd bool, endp
 	if !ok {
 		return nil, fmt.Errorf("failed to convert ip to netip.Addr")
 	}
-	if ok := r.connLimiter.addConn(ipAddr); !ok {
-		return nil, fmt.Errorf("connections per ip limit exceeded for %s", endpoint)
+	return r.openConnection(dir, usefd, endpoint, ipAddr)
+}
+
+func (r *resourceManager) openConnection(dir network.Direction, usefd bool, endpoint multiaddr.Multiaddr, ip netip.Addr) (network.ConnManagementScope, error) {
+	if ip.IsValid() {
+		if ok := r.connLimiter.addConn(ip); !ok {
+			return nil, fmt.Errorf("connections per ip limit exceeded for %s", endpoint)
+		}
 	}
 
 	var conn *connectionScope
-	conn = newConnectionScope(dir, usefd, r.limits.GetConnLimits(), r, endpoint, ipAddr)
+	conn = newConnectionScope(dir, usefd, r.limits.GetConnLimits(), r, endpoint, ip)
 
-	err = conn.AddConn(dir, usefd)
-	if err != nil {
+	err := conn.AddConn(dir, usefd)
+	if err != nil && ip.IsValid() {
 		// Try again if this is an allowlisted connection
 		// Failed to open connection, let's see if this was allowlisted and try again
 		allowed := r.allowlist.Allowed(endpoint)
@@ -664,7 +677,9 @@ func (s *connectionScope) PeerScope() network.PeerScope {
 }
 
 func (s *connectionScope) Done() {
-	s.rcmgr.connLimiter.rmConn(s.ip)
+	if s.ip.IsValid() {
+		s.rcmgr.connLimiter.rmConn(s.ip)
+	}
 	s.resourceScope.Done()
 }
 
