@@ -25,7 +25,7 @@ var ActivationThresh = 4
 // for adding to an ObservedAddrManager.
 var observedAddrManagerWorkerChannelSize = 16
 
-const maxExternalThinWaistAddrsPerLocalAddr = 5
+const maxExternalThinWaistAddrsPerLocalAddr = 3
 
 // thinWaist is a struct that stores the address along with it's thin waist prefix and rest of the multiaddr
 type thinWaist struct {
@@ -508,6 +508,7 @@ func (o *ObservedAddrManager) getNATType() (tcpNATType, udpNATType network.NATDe
 			}
 		}
 	}
+
 	sort.Sort(sort.Reverse(sort.IntSlice(tcpCounts)))
 	sort.Sort(sort.Reverse(sort.IntSlice(udpCounts)))
 
@@ -521,14 +522,14 @@ func (o *ObservedAddrManager) getNATType() (tcpNATType, udpNATType network.NATDe
 
 	// If the top elements cover more than 1/2 of all the observations, there's a > 50% chance that
 	// hole punching based on outputs of observed address manager will succeed
-	if len(tcpCounts) > 0 {
+	if tcpTotal >= 3*maxExternalThinWaistAddrsPerLocalAddr {
 		if tcpTopCounts >= tcpTotal/2 {
 			tcpNATType = network.NATDeviceTypeCone
 		} else {
 			tcpNATType = network.NATDeviceTypeSymmetric
 		}
 	}
-	if len(udpCounts) > 0 {
+	if udpTotal >= 3*maxExternalThinWaistAddrsPerLocalAddr {
 		if udpTopCounts >= udpTotal/2 {
 			udpNATType = network.NATDeviceTypeCone
 		} else {

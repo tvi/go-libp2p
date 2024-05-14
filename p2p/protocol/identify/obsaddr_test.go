@@ -296,7 +296,7 @@ func TestObservedAddrManager(t *testing.T) {
 		// At this point we have 10 groups of N / 10 with 10 observations for every connection
 		// The output should remain stable
 		require.Eventually(t, func() bool {
-			return len(o.Addrs()) == 15
+			return len(o.Addrs()) == 3*maxExternalThinWaistAddrsPerLocalAddr
 		}, 1*time.Second, 100*time.Millisecond)
 		addrs := o.Addrs()
 		for i := 0; i < 10; i++ {
@@ -359,15 +359,14 @@ func TestObservedAddrManager(t *testing.T) {
 	t.Run("getNATType", func(t *testing.T) {
 		o := newObservedAddrMgr()
 		defer o.Close()
+
 		observedWebTransport := ma.StringCast("/ip4/2.2.2.2/udp/1/quic-v1/webtransport")
-		c1 := newConn(webTransport4ListenAddr, ma.StringCast("/ip4/1.2.3.1/udp/1/quic-v1/webtransport"))
-		c2 := newConn(webTransport4ListenAddr, ma.StringCast("/ip4/1.2.3.2/udp/1/quic-v1/webtransport"))
-		c3 := newConn(webTransport4ListenAddr, ma.StringCast("/ip4/1.2.3.3/udp/1/quic-v1/webtransport"))
-		c4 := newConn(webTransport4ListenAddr, ma.StringCast("/ip4/1.2.3.4/udp/1/quic-v1/webtransport"))
-		o.Record(c1, observedWebTransport)
-		o.Record(c2, observedWebTransport)
-		o.Record(c3, observedWebTransport)
-		o.Record(c4, observedWebTransport)
+		var udpConns [5 * maxExternalThinWaistAddrsPerLocalAddr]connMultiaddrs
+		for i := 0; i < len(udpConns); i++ {
+			udpConns[i] = newConn(webTransport4ListenAddr, ma.StringCast(fmt.Sprintf("/ip4/1.2.3.%d/udp/1/quic-v1/webtransport", i)))
+			o.Record(udpConns[i], observedWebTransport)
+			time.Sleep(10 * time.Millisecond)
+		}
 		require.Eventually(t, func() bool {
 			return addrsEqual(o.Addrs(), []ma.Multiaddr{observedWebTransport})
 		}, 1*time.Second, 100*time.Millisecond)
@@ -375,13 +374,6 @@ func TestObservedAddrManager(t *testing.T) {
 		tcpNAT, udpNAT := o.getNATType()
 		require.Equal(t, tcpNAT, network.NATDeviceTypeUnknown)
 		require.Equal(t, udpNAT, network.NATDeviceTypeCone)
-		o.removeConn(c1)
-		o.removeConn(c2)
-		o.removeConn(c3)
-		o.removeConn(c4)
-		require.Eventually(t, func() bool {
-			return checkAllEntriesRemoved(o)
-		}, 1*time.Second, 100*time.Millisecond)
 	})
 	t.Run("NATTypeSymmetric", func(t *testing.T) {
 		o := newObservedAddrMgr()
@@ -404,7 +396,7 @@ func TestObservedAddrManager(t *testing.T) {
 		// At this point we have 20 groups with 5 observations for every connection
 		// The output should remain stable
 		require.Eventually(t, func() bool {
-			return len(o.Addrs()) == 10
+			return len(o.Addrs()) == 2*maxExternalThinWaistAddrsPerLocalAddr
 		}, 1*time.Second, 100*time.Millisecond)
 
 		tcpNAT, udpNAT := o.getNATType()
@@ -451,14 +443,12 @@ func TestObservedAddrManager(t *testing.T) {
 		sub, err := bus.Subscribe(new(event.EvtNATDeviceTypeChanged))
 		require.NoError(t, err)
 		observedWebTransport := ma.StringCast("/ip4/2.2.2.2/udp/1/quic-v1/webtransport")
-		c1 := newConn(webTransport4ListenAddr, ma.StringCast("/ip4/1.2.3.1/udp/1/quic-v1/webtransport"))
-		c2 := newConn(webTransport4ListenAddr, ma.StringCast("/ip4/1.2.3.2/udp/1/quic-v1/webtransport"))
-		c3 := newConn(webTransport4ListenAddr, ma.StringCast("/ip4/1.2.3.3/udp/1/quic-v1/webtransport"))
-		c4 := newConn(webTransport4ListenAddr, ma.StringCast("/ip4/1.2.3.4/udp/1/quic-v1/webtransport"))
-		o.Record(c1, observedWebTransport)
-		o.Record(c2, observedWebTransport)
-		o.Record(c3, observedWebTransport)
-		o.Record(c4, observedWebTransport)
+		var udpConns [5 * maxExternalThinWaistAddrsPerLocalAddr]connMultiaddrs
+		for i := 0; i < len(udpConns); i++ {
+			udpConns[i] = newConn(webTransport4ListenAddr, ma.StringCast(fmt.Sprintf("/ip4/1.2.3.%d/udp/1/quic-v1/webtransport", i)))
+			o.Record(udpConns[i], observedWebTransport)
+			time.Sleep(10 * time.Millisecond)
+		}
 		require.Eventually(t, func() bool {
 			return addrsEqual(o.Addrs(), []ma.Multiaddr{observedWebTransport})
 		}, 1*time.Second, 100*time.Millisecond)

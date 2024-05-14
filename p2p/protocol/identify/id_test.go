@@ -114,8 +114,13 @@ func TestIDService(t *testing.T) {
 			}
 			// This test is highly timing dependent, waiting on timeouts/expiration.
 			oldTTL := peerstore.RecentlyConnectedAddrTTL
+			oldTempTTL := peerstore.TempAddrTTL
 			peerstore.RecentlyConnectedAddrTTL = 500 * time.Millisecond
-			t.Cleanup(func() { peerstore.RecentlyConnectedAddrTTL = oldTTL })
+			peerstore.TempAddrTTL = 50 * time.Millisecond
+			t.Cleanup(func() {
+				peerstore.RecentlyConnectedAddrTTL = oldTTL
+				peerstore.TempAddrTTL = oldTempTTL
+			})
 
 			clk := mockClock.NewMock()
 			swarm1 := swarmt.GenSwarm(t, swarmt.WithClock(clk))
@@ -615,8 +620,13 @@ func TestLargeIdentifyMessage(t *testing.T) {
 		t.Skip("setting peerstore.RecentlyConnectedAddrTTL is racy")
 	}
 	oldTTL := peerstore.RecentlyConnectedAddrTTL
+	oldTempTTL := peerstore.TempAddrTTL
 	peerstore.RecentlyConnectedAddrTTL = 500 * time.Millisecond
-	t.Cleanup(func() { peerstore.RecentlyConnectedAddrTTL = oldTTL })
+	peerstore.TempAddrTTL = 50 * time.Millisecond
+	t.Cleanup(func() {
+		peerstore.RecentlyConnectedAddrTTL = oldTTL
+		peerstore.TempAddrTTL = oldTempTTL
+	})
 
 	clk := mockClock.NewMock()
 	swarm1 := swarmt.GenSwarm(t, swarmt.WithClock(clk))

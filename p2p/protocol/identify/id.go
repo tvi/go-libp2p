@@ -34,24 +34,27 @@ import (
 
 var log = logging.Logger("net/identify")
 
+var Timeout = 30 * time.Second // timeout on all incoming Identify interactions
+
 const (
 	// ID is the protocol.ID of version 1.0.0 of the identify service.
 	ID = "/ipfs/id/1.0.0"
 	// IDPush is the protocol.ID of the Identify push protocol.
 	// It sends full identify messages containing the current state of the peer.
 	IDPush = "/ipfs/id/push/1.0.0"
-)
 
-const ServiceName = "libp2p.identify"
+	ServiceName = "libp2p.identify"
 
-const maxPushConcurrency = 32
-
-var Timeout = 60 * time.Second // timeout on all incoming Identify interactions
-
-const (
-	legacyIDSize = 2 * 1024 // 2k Bytes
-	signedIDSize = 8 * 1024 // 8K
-	maxMessages  = 10
+	legacyIDSize          = 2 * 1024
+	signedIDSize          = 8 * 1024
+	maxOwnIdentifyMsgSize = 4096 // smaller than what we accept. This is 4k to be compatible with rust-libp2p
+	maxMessages           = 10
+	maxPushConcurrency    = 32
+	// number of addresses to keep for peers we have disconnected from for peerstore.RecentlyConnectedTTL time
+	// This number can be small as we already filter peer addresses based on whether the peer is connected to us over
+	// localhost, private IP or public IP address
+	recentlyConnectedPeerMaxAddrs = 20
+	connectedPeerMaxAddrs         = 500
 )
 
 var defaultUserAgent = "github.com/libp2p/go-libp2p"
@@ -585,10 +588,18 @@ func readAllIDMessages(r pbio.Reader, finalMsg proto.Message) error {
 }
 
 func (ids *idService) updateSnapshot() (updated bool) {
-	addrs := ids.Host.Addrs()
-	slices.SortFunc(addrs, func(a, b ma.Multiaddr) int { return bytes.Compare(a.Bytes(), b.Bytes()) })
 	protos := ids.Host.Mux().Protocols()
 	slices.Sort(protos)
+
+	addrs := ids.Host.Addrs()
+	slices.SortFunc(addrs, func(a, b ma.Multiaddr) int { return bytes.Compare(a.Bytes(), b.Bytes()) })
+
+	usedSpace := len(ids.ProtocolVersion) + len(ids.UserAgent)
+	for i := 0; i < len(protos); i++ {
+		usedSpace += len(protos[i])
+	}
+	addrs = trimHostAddrList(addrs, maxOwnIdentifyMsgSize-usedSpace-256) // 256 bytes of buffer
+
 	snapshot := identifySnapshot{
 		addrs:     addrs,
 		protocols: protos,
@@ -809,7 +820,12 @@ func (ids *idService) consumeMessage(mes *pb.Identify, c network.Conn, isPush bo
 	} else {
 		addrs = lmaddrs
 	}
-	ids.Host.Peerstore().AddAddrs(p, filterAddrs(addrs, c.RemoteMultiaddr()), ttl)
+	addrs = filterAddrs(addrs, c.RemoteMultiaddr())
+	if len(addrs) > connectedPeerMaxAddrs {
+		addrs = addrs[:connectedPeerMaxAddrs]
+	}
+
+	ids.Host.Peerstore().AddAddrs(p, addrs, ttl)
 
 	// Finally, expire all temporary addrs.
 	ids.Host.Peerstore().UpdateAddrs(p, peerstore.TempAddrTTL, 0)
@@ -1017,15 +1033,32 @@ func (nn *netNotifiee) Disconnected(_ network.Network, c network.Conn) {
 		ids.observedAddrMgr.removeConn(c)
 	}
 
+	// Last disconnect.
+	// Undo the setting of addresses to peer.ConnectedAddrTTL we did
+	ids.addrMu.Lock()
+	defer ids.addrMu.Unlock()
+
+	// This check MUST happen after acquiring the Lock as identify on a different connection
+	// might be trying to add addresses.
 	switch ids.Host.Network().Connectedness(c.RemotePeer()) {
 	case network.Connected, network.Limited:
 		return
 	}
-	// Last disconnect.
-	// Undo the setting of addresses to peer.ConnectedAddrTTL we did
-	ids.addrMu.Lock()
-	ids.Host.Peerstore().UpdateAddrs(c.RemotePeer(), peerstore.ConnectedAddrTTL, peerstore.RecentlyConnectedAddrTTL)
-	ids.addrMu.Unlock()
+	// peerstore returns the elements in a random order as it uses a map to store the addresses
+	addrs := ids.Host.Peerstore().Addrs(c.RemotePeer())
+	n := len(addrs)
+	if n > recentlyConnectedPeerMaxAddrs {
+		// We want to always save the address we are connected to
+		for i, a := range addrs {
+			if a.Equal(c.RemoteMultiaddr()) {
+				addrs[i], addrs[0] = addrs[0], addrs[i]
+			}
+		}
+		n = recentlyConnectedPeerMaxAddrs
+	}
+	ids.Host.Peerstore().UpdateAddrs(c.RemotePeer(), peerstore.ConnectedAddrTTL, peerstore.TempAddrTTL)
+	ids.Host.Peerstore().AddAddrs(c.RemotePeer(), addrs[:n], peerstore.RecentlyConnectedAddrTTL)
+	ids.Host.Peerstore().UpdateAddrs(c.RemotePeer(), peerstore.TempAddrTTL, 0)
 }
 
 func (nn *netNotifiee) Listen(n network.Network, a ma.Multiaddr)      {}
@@ -1043,4 +1076,56 @@ func filterAddrs(addrs []ma.Multiaddr, remote ma.Multiaddr) []ma.Multiaddr {
 		return ma.FilterAddrs(addrs, func(a ma.Multiaddr) bool { return !manet.IsIPLoopback(a) })
 	}
 	return ma.FilterAddrs(addrs, manet.IsPublicAddr)
+}
+
+func trimHostAddrList(addrs []ma.Multiaddr, maxSize int) []ma.Multiaddr {
+	totalSize := 0
+	for _, a := range addrs {
+		totalSize += len(a.Bytes())
+	}
+	if totalSize <= maxSize {
+		return addrs
+	}
+
+	score := func(addr ma.Multiaddr) int {
+		var res int
+		if manet.IsPublicAddr(addr) {
+			res |= 1 << 12
+		} else if !manet.IsIPLoopback(addr) {
+			res |= 1 << 11
+		}
+		var protocolWeight int
+		ma.ForEach(addr, func(c ma.Component) bool {
+			switch c.Protocol().Code {
+			case ma.P_QUIC_V1:
+				protocolWeight = 5
+			case ma.P_TCP:
+				protocolWeight = 4
+			case ma.P_WSS:
+				protocolWeight = 3
+			case ma.P_WEBTRANSPORT:
+				protocolWeight = 2
+			case ma.P_WEBRTC_DIRECT:
+				protocolWeight = 1
+			case ma.P_P2P:
+				return false
+			}
+			return true
+		})
+		res |= 1 << protocolWeight
+		return res
+	}
+
+	slices.SortStableFunc(addrs, func(a, b ma.Multiaddr) int {
+		return score(b) - score(a) // b-a for reverse order
+	})
+	totalSize = 0
+	for i, a := range addrs {
+		totalSize += len(a.Bytes())
+		if totalSize > maxSize {
+			addrs = addrs[:i]
+			break
+		}
+	}
+	return addrs
 }
