@@ -134,5 +134,8 @@ func (cl *connLimiter) rmConn(ip netip.Addr) {
 			continue
 		}
 		countsPerLimit[i][masked]--
+		if countsPerLimit[i][masked] == 0 {
+			delete(countsPerLimit[i], masked)
+		}
 	}
 }
