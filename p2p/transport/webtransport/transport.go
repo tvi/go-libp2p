@@ -79,7 +79,7 @@ type transport struct {
 	noise *noise.Transport
 
 	connMx sync.Mutex
-	conns  map[quic.ConnectionTracingID]*conn // using quic-go's ConnectionTracingKey as map key
+	conns  map[uint64]*conn // using quic-go's ConnectionTracingKey as map key
 }
 
 var _ tpt.Transport = &transport{}
@@ -105,7 +105,7 @@ func New(key ic.PrivKey, psk pnet.PSK, connManager *quicreuse.ConnManager, gater
 		gater:       gater,
 		clock:       clock.New(),
 		connManager: connManager,
-		conns:       map[quic.ConnectionTracingID]*conn{},
+		conns:       map[uint64]*conn{},
 	}
 	for _, opt := range opts {
 		if err := opt(t); err != nil {
@@ -203,10 +203,12 @@ func (t *transport) dial(ctx context.Context, addr ma.Multiaddr, url, sni string
 		return nil, err
 	}
 	dialer := webtransport.Dialer{
-		DialAddr: func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
-			return conn.(quic.EarlyConnection), nil
+		RoundTripper: &http3.RoundTripper{
+			Dial: func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
+				return conn.(quic.EarlyConnection), nil
+			},
+			QuicConfig: t.connManager.ClientConfig().Clone(),
 		},
-		QUICConfig: t.connManager.ClientConfig().Clone(),
 	}
 	rsp, sess, err := dialer.Dial(ctx, url, nil)
 	if err != nil {
@@ -347,7 +349,7 @@ func (t *transport) allowWindowIncrease(conn quic.Connection, size uint64) bool 
 	t.connMx.Lock()
 	defer t.connMx.Unlock()
 
-	c, ok := t.conns[conn.Context().Value(quic.ConnectionTracingKey).(quic.ConnectionTracingID)]
+	c, ok := t.conns[conn.Context().Value(quic.ConnectionTracingKey).(uint64)]
 	if !ok {
 		return false
 	}
@@ -356,13 +358,13 @@ func (t *transport) allowWindowIncrease(conn quic.Connection, size uint64) bool 
 
 func (t *transport) addConn(sess *webtransport.Session, c *conn) {
 	t.connMx.Lock()
-	t.conns[sess.Context().Value(quic.ConnectionTracingKey).(quic.ConnectionTracingID)] = c
+	t.conns[sess.Context().Value(quic.ConnectionTracingKey).(uint64)] = c
 	t.connMx.Unlock()
 }
 
 func (t *transport) removeConn(sess *webtransport.Session) {
 	t.connMx.Lock()
-	delete(t.conns, sess.Context().Value(quic.ConnectionTracingKey).(quic.ConnectionTracingID))
+	delete(t.conns, sess.Context().Value(quic.ConnectionTracingKey).(uint64))
 	t.connMx.Unlock()
 }
 
