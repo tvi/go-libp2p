@@ -3,11 +3,14 @@ package gostream
 import (
 	"context"
 	"net"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/protocol"
 )
+
+var ServerTimeout = 60 * time.Second
 
 // listener is an implementation of net.Listener which handles
 // http-tagged streams from a libp2p connection.
@@ -60,6 +63,7 @@ func Listen(h host.Host, tag protocol.ID) (net.Listener, error) {
 	}
 
 	h.SetStreamHandler(tag, func(s network.Stream) {
+		s.SetDeadline(time.Now().Add(ServerTimeout))
 		select {
 		case l.streamCh <- s:
 		case <-ctx.Done():
