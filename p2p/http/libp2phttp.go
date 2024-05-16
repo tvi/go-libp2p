@@ -30,7 +30,7 @@ import (
 var log = logging.Logger("libp2phttp")
 
 const ProtocolIDForMultistreamSelect = "/http/1.1"
-const WellKnownProtocols = "/.well-known/libp2p/protocols"
+const WellKnownProtocols = "/.well-known/libp2p"
 const peerMetadataLimit = 8 << 10 // 8KB
 const peerMetadataLRUSize = 256   // How many different peer's metadata to keep in our LRU cache
 
