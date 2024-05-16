@@ -130,5 +130,7 @@ require (
 )
 
 // Remove this once fx releases the next version.
-// We want to ship with a fix around SIGINT handling: https://github.com/uber-go/fx/pull/1198
+// We want to ship with a fix around SIGINT handling:
+// https://github.com/uber-go/fx/pull/1198.
+// Context: https://github.com/libp2p/go-libp2p/issues/2785
 replace go.uber.org/fx v1.21.1 => github.com/uber-go/fx v1.21.2-0.20240515133256-cb9cccf55845
