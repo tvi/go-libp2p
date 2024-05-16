@@ -54,7 +54,7 @@ var (
 	DefaultAddrsFactory = func(addrs []ma.Multiaddr) []ma.Multiaddr { return addrs }
 )
 
-const maxPeerRecordSize = 4096 // 4k to be compatible with rust-libp2p identify implementation
+const maxPeerRecordSize = 8 * 1024 // 8k to be compatible with identify's limit
 
 // AddrsFactory functions can be passed to New in order to override
 // addresses returned by Addrs.

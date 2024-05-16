@@ -47,7 +47,7 @@ const (
 
 	legacyIDSize          = 2 * 1024
 	signedIDSize          = 8 * 1024
-	maxOwnIdentifyMsgSize = 4096 // smaller than what we accept. This is 4k to be compatible with rust-libp2p
+	maxOwnIdentifyMsgSize = 4 * 1024 // smaller than what we accept. This is 4k to be compatible with rust-libp2p
 	maxMessages           = 10
 	maxPushConcurrency    = 32
 	// number of addresses to keep for peers we have disconnected from for peerstore.RecentlyConnectedTTL time
