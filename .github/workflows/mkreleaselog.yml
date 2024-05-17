@@ -19,6 +19,7 @@ jobs:
       - name: Copy files to GOPATH
         run: |
           mkdir -p ~/go/github.com/libp2p
+          cd ..
           cp -r go-libp2p ~/go/github.com/libp2p
       - name: Run mkreleaselog script
         run: |
