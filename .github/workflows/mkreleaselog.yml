@@ -35,5 +35,5 @@ jobs:
       - name: Upload release log
         uses: actions/upload-artifact@v4
         with:
-          name: release.log
+          name: release-log.txt
           path: /tmp/release.log
