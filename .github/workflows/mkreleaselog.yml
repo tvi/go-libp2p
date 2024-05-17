@@ -23,6 +23,10 @@ jobs:
           mkdir -p ~/go/github.com/libp2p
           cd ..
           cp -r go-libp2p ~/go/github.com/libp2p
+      - name: Install dependencies
+        run: |
+          cd ~/go/github.com/libp2p/go-libp2p
+          go mod download
       - name: Run mkreleaselog script
         shell: zsh {0}
         run: |
