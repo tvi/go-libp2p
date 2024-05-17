@@ -15,8 +15,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: libp2p/go-libp2p
-          path: ~/go/github.com/libp2p/go-libp2p
       - uses: actions/setup-go@v5
+      - name: Copy files to GOPATH
+        run: |
+          mkdir -p ~/go/github.com/libp2p
+          cp -r go-libp2p ~/go/github.com/libp2p
       - name: Run mkreleaselog script
         run: |
           cd ~/go/github.com/libp2p/go-libp2p
