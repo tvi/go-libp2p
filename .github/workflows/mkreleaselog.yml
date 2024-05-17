@@ -31,9 +31,9 @@ jobs:
         shell: zsh {0}
         run: |
           cd ~/go/src/github.com/libp2p/go-libp2p
-          ./scripts/mkreleaselog > release.log
+          ./scripts/mkreleaselog > /tmp/release.log
       - name: Upload release log
         uses: actions/upload-artifact@v4
         with:
           name: release.log
-          path: release.log
+          path: /tmp/release.log
