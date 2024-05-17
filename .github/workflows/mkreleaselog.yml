@@ -1,0 +1,20 @@
+name: Make Release Log
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          repository: libp2p/go-libp2p
+          path: ~/go/github.com/libp2p/go-libp2p
+      - uses: actions/setup-go@v5
+      - name: Run mkreleaselog script
+        run: |
+          cd ~/go/github.com/libp2p/go-libp2p
+          ./scripts/mkreleaselog
