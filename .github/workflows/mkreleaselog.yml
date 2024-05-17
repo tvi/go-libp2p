@@ -24,7 +24,7 @@ jobs:
           cd ..
           cp -r go-libp2p ~/go/github.com/libp2p
       - name: Run mkreleaselog script
-        shell: zsh
+        shell: zsh {0}
         run: |
           cd ~/go/github.com/libp2p/go-libp2p
           ./scripts/mkreleaselog
