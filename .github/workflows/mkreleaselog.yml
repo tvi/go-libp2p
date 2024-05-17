@@ -2,6 +2,9 @@ name: Make Release Log
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - "marco/mkreleaselog-in-ci"
 
 jobs:
   build:
