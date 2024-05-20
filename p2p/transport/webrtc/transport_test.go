@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +19,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	tpt "github.com/libp2p/go-libp2p/core/transport"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multibase"
@@ -866,4 +869,94 @@ func TestGenUfrag(t *testing.T) {
 		s := genUfrag()
 		require.True(t, strings.HasPrefix(s, "libp2p+webrtc+v1/"))
 	}
+}
+
+func TestManyConnections(t *testing.T) {
+	const N = 200
+	errCh := make(chan error, 200)
+	successCh := make(chan struct{}, 1)
+
+	tr, lp := getTransport(t)
+	ln, err := tr.Listen(ma.StringCast("/ip4/127.0.0.1/udp/0/webrtc-direct"))
+	require.NoError(t, err)
+	defer ln.Close()
+
+	runListenConn := func(conn tpt.CapableConn) {
+		defer conn.Close()
+
+		s, err := conn.AcceptStream()
+		if err != nil {
+			t.Errorf("accept stream failed for listener: %s", err)
+			errCh <- err
+			return
+		}
+		var b [4]byte
+		if _, err := s.Read(b[:]); err != nil {
+			t.Errorf("read stream failed for listener: %s", err)
+			errCh <- err
+			return
+		}
+		s.Write(b[:])
+		_, err = s.Read(b[:]) // peer will close the connection after read
+		if !assert.Error(t, err) {
+			errCh <- errors.New("expected peer to close connection")
+			return
+		}
+	}
+
+	runDialConn := func(conn tpt.CapableConn) error {
+		defer conn.Close()
+
+		s, err := conn.OpenStream(context.Background())
+		if err != nil {
+			t.Errorf("accept stream failed for listener: %s", err)
+			return err
+		}
+		var b [4]byte
+		if _, err := s.Write(b[:]); err != nil {
+			t.Errorf("write stream failed for dialer: %s", err)
+			return err
+		}
+		if _, err := s.Read(b[:]); err != nil {
+			t.Errorf("read stream failed for dialer: %s", err)
+			return err
+		}
+		return nil
+	}
+
+	go func() {
+		for i := 0; i < N; i++ {
+			conn, err := ln.Accept()
+			if err != nil {
+				t.Errorf("listener failed to accept conneciton: %s %d", err, runtime.NumGoroutine())
+				return
+			}
+			runListenConn(conn)
+			successCh <- struct{}{}
+		}
+	}()
+
+	tp, _ := getTransport(t)
+	for i := 0; i < N; i++ {
+		// This test aims to check for deadlocks. So keep a high timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		conn, err := tp.Dial(ctx, ln.Multiaddr(), lp)
+		if err != nil {
+			t.Errorf("dial failed: %s %d", err, runtime.NumGoroutine())
+			cancel()
+			return
+		}
+		err = runDialConn(conn)
+		require.NoError(t, err)
+		cancel()
+		select {
+		case <-time.After(120 * time.Second):
+			t.Fatalf("timed out %d", runtime.NumGoroutine())
+		case <-errCh:
+			t.Fatal("listener error:", err, runtime.NumGoroutine())
+		case <-successCh:
+		}
+		t.Log("completed conn:", i, runtime.NumGoroutine())
+	}
+
 }

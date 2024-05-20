@@ -33,7 +33,7 @@ func (c *connMultiaddrs) LocalMultiaddr() ma.Multiaddr  { return c.local }
 func (c *connMultiaddrs) RemoteMultiaddr() ma.Multiaddr { return c.remote }
 
 const (
-	candidateSetupTimeout         = 20 * time.Second
+	candidateSetupTimeout         = 60 * time.Second
 	DefaultMaxInFlightConnections = 10
 )
 
@@ -128,11 +128,12 @@ func (l *listener) listen() {
 
 			ctx, cancel := context.WithTimeout(l.ctx, candidateSetupTimeout)
 			defer cancel()
-
+			fmt.Println("received UFrag", candidate.Ufrag, candidate.Addr)
 			conn, err := l.handleCandidate(ctx, candidate)
 			if err != nil {
 				l.mux.RemoveConnByUfrag(candidate.Ufrag)
-				log.Debugf("could not accept connection: %s: %v", candidate.Ufrag, err)
+				log.Errorf("could not accept connection: %s: %v", candidate.Ufrag, err)
+				fmt.Printf("could not accept connection: %s: %v\n", candidate.Ufrag, err)
 				return
 			}
 
@@ -219,7 +220,7 @@ func (l *listener) setupConnection(
 		return nil, fmt.Errorf("instantiating peer connection failed: %w", err)
 	}
 
-	errC := addOnConnectionStateChangeCallback(w.PeerConnection)
+	errC := addOnConnectionStateChangeCallback(w.PeerConnection, "listener")
 	// Infer the client SDP from the incoming STUN message by setting the ice-ufrag.
 	if err := w.PeerConnection.SetRemoteDescription(webrtc.SessionDescription{
 		SDP:  createClientSDP(candidate.Addr, candidate.Ufrag),
@@ -326,11 +327,13 @@ func (l *listener) Multiaddr() ma.Multiaddr {
 // * is closed when the state changes to Connection
 // * receives an error when the state changes to Failed
 // * doesn't receive anything (nor is closed) when the state changes to Disconnected
-func addOnConnectionStateChangeCallback(pc *webrtc.PeerConnection) <-chan error {
+func addOnConnectionStateChangeCallback(pc *webrtc.PeerConnection, side string) <-chan error {
 	errC := make(chan error, 1)
 	var once sync.Once
+	st := time.Now()
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		switch state {
+		fmt.Println("state received: ", side, state, pc.ConnectionState(), time.Since(st))
+		switch pc.ConnectionState() {
 		case webrtc.PeerConnectionStateConnected:
 			once.Do(func() { close(errC) })
 		case webrtc.PeerConnectionStateFailed:
@@ -338,12 +341,13 @@ func addOnConnectionStateChangeCallback(pc *webrtc.PeerConnection) <-chan error 
 				errC <- errors.New("peerconnection failed")
 				close(errC)
 			})
+			log.Error("peer connection failed")
 		case webrtc.PeerConnectionStateDisconnected:
 			// the connection can move to a disconnected state and back to a connected state without ICE renegotiation.
 			// This could happen when underlying UDP packets are lost, and therefore the connection moves to the disconnected state.
 			// If the connection then receives packets on the connection, it can move back to the connected state.
 			// If no packets are received until the failed timeout is triggered, the connection moves to the failed state.
-			log.Warn("peerconnection disconnected")
+			log.Error("peerconnection disconnected")
 		}
 	})
 	return errC

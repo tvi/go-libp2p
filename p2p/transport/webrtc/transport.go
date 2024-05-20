@@ -73,9 +73,9 @@ const (
 // timeout values for the peerconnection
 // https://github.com/pion/webrtc/blob/v3.1.50/settingengine.go#L102-L109
 const (
-	DefaultDisconnectedTimeout = 20 * time.Second
-	DefaultFailedTimeout       = 30 * time.Second
-	DefaultKeepaliveTimeout    = 15 * time.Second
+	DefaultDisconnectedTimeout = 60 * time.Second
+	DefaultFailedTimeout       = 60 * time.Second
+	DefaultKeepaliveTimeout    = 60 * time.Second
 
 	sctpReceiveBufferSize = 100_000
 )
@@ -327,7 +327,7 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 		return nil, fmt.Errorf("instantiating peer connection failed: %w", err)
 	}
 
-	errC := addOnConnectionStateChangeCallback(w.PeerConnection)
+	errC := addOnConnectionStateChangeCallback(w.PeerConnection, "dialer")
 
 	// do offer-answer exchange
 	offer, err := w.PeerConnection.CreateOffer(nil)
