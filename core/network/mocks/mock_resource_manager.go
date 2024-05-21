@@ -71,6 +71,21 @@ func (mr *MockResourceManagerMockRecorder) OpenConnection(arg0, arg1, arg2 any) 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OpenConnection", reflect.TypeOf((*MockResourceManager)(nil).OpenConnection), arg0, arg1, arg2)
 }
 
+// OpenConnectionNoIP mocks base method.
+func (m *MockResourceManager) OpenConnectionNoIP(arg0 network.Direction, arg1 bool, arg2 multiaddr.Multiaddr) (network.ConnManagementScope, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "OpenConnectionNoIP", arg0, arg1, arg2)
+	ret0, _ := ret[0].(network.ConnManagementScope)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// OpenConnectionNoIP indicates an expected call of OpenConnectionNoIP.
+func (mr *MockResourceManagerMockRecorder) OpenConnectionNoIP(arg0, arg1, arg2 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OpenConnectionNoIP", reflect.TypeOf((*MockResourceManager)(nil).OpenConnectionNoIP), arg0, arg1, arg2)
+}
+
 // OpenStream mocks base method.
 func (m *MockResourceManager) OpenStream(arg0 peer.ID, arg1 network.Direction) (network.StreamManagementScope, error) {
 	m.ctrl.T.Helper()

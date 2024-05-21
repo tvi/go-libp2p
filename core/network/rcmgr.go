@@ -87,6 +87,11 @@ type ResourceManager interface {
 	// the end of the scope's span.
 	OpenConnection(dir Direction, usefd bool, endpoint multiaddr.Multiaddr) (ConnManagementScope, error)
 
+	// OpenConnectionNoIP is like OpenConnection, but does not use IP
+	// information.  Used when we still want to limit the connection by other
+	// scopes, but don't have IP information. i.e. relaying
+	OpenConnectionNoIP(dir Direction, usefd bool, endpoint multiaddr.Multiaddr) (ConnManagementScope, error)
+
 	// OpenStream creates a new stream scope, initially unnegotiated.
 	// An unnegotiated stream will be initially unattached to any protocol scope
 	// and constrained by the transient scope.
@@ -301,6 +306,9 @@ func (n *NullResourceManager) ViewPeer(p peer.ID, f func(PeerScope) error) error
 	return f(&NullScope{})
 }
 func (n *NullResourceManager) OpenConnection(dir Direction, usefd bool, endpoint multiaddr.Multiaddr) (ConnManagementScope, error) {
+	return &NullScope{}, nil
+}
+func (n *NullResourceManager) OpenConnectionNoIP(dir Direction, usefd bool, endpoint multiaddr.Multiaddr) (ConnManagementScope, error) {
 	return &NullScope{}, nil
 }
 func (n *NullResourceManager) OpenStream(p peer.ID, dir Direction) (StreamManagementScope, error) {
