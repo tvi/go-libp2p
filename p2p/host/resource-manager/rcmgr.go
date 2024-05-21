@@ -324,6 +324,22 @@ func (r *resourceManager) OpenConnectionNoIP(dir network.Direction, usefd bool, 
 }
 
 func (r *resourceManager) OpenConnection(dir network.Direction, usefd bool, endpoint multiaddr.Multiaddr) (network.ConnManagementScope, error) {
+	// Temporary workaround to provide backwards compatibility for users that
+	// implement the ResourceManager interface by wrapping this implementation,
+	// but do not provide an OpenConnectionNoIP method.
+	//
+	// Only circuitv2 opens an connection without an
+	// IP address in the multiaddr. The circuitv2 transport checks if there is
+	// an OpenConnectionNoIP method, but will fallback to just calling
+	// OpenConnection if not. If a user wrapped this implementation, their
+	// wrapper won't have an OpenConnectionNoIP.  And without this check it
+	// would error in the `manet.ToIP` below.  This is a workaround. The next
+	// version will add OpenConnectionNoIP to the ResourceManager interface. But
+	// that is a breaking change
+	if _, err := endpoint.ValueForProtocol(multiaddr.P_CIRCUIT); err == nil {
+		return r.OpenConnectionNoIP(dir, usefd, endpoint)
+	}
+
 	ip, err := manet.ToIP(endpoint)
 	if err != nil {
 		return nil, err
