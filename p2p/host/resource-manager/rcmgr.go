@@ -148,6 +148,28 @@ func NewResourceManager(limits Limiter, opts ...Option) (network.ResourceManager
 		}
 	}
 
+	registeredConnLimiterPrefixes := make(map[string]struct{})
+	for _, cidr := range r.connLimiter.cidrLimitV4 {
+		registeredConnLimiterPrefixes[cidr.Network.String()] = struct{}{}
+	}
+	for _, cidr := range r.connLimiter.cidrLimitV6 {
+		registeredConnLimiterPrefixes[cidr.Network.String()] = struct{}{}
+	}
+	for _, network := range allowlist.allowedNetworks {
+		prefix, err := netip.ParsePrefix(network.String())
+		if err != nil {
+			log.Debugf("failed to parse prefix from allowlist %s, %s", network, err)
+			continue
+		}
+		if _, ok := registeredConnLimiterPrefixes[prefix.String()]; !ok {
+			// connlimiter doesn't know about this network. Let's fix that
+			r.connLimiter.addCIDRLimit(prefix.Addr().Is6(), CIDRLimit{
+				Network:   prefix,
+				ConnCount: r.limits.GetAllowlistedSystemLimits().GetConnTotalLimit(),
+			})
+		}
+	}
+
 	if !r.disableMetrics {
 		var sr TraceReporter
 		sr, err := NewStatsTraceReporter()

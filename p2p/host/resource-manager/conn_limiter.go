@@ -20,7 +20,7 @@ type CIDRLimit struct {
 	// The CIDR prefix for which this limit applies.
 	Network netip.Prefix
 
-	// The maximum number of connections allowed for each subnet.
+	// The maximum number of connections allowed for this subnet.
 	ConnCount int
 }
 
@@ -69,8 +69,9 @@ func sortCIDRLimits(limits []CIDRLimit) []CIDRLimit {
 	return limits
 }
 
-// WithCIDRLimit sets the limits for the number of connections allowed per CIDR
-// defined address block.
+// WithCIDRLimit sets the limits for the number of connections allowed for a
+// specific CIDR address block. Use this when you want to set higher limits for
+// a specific subnet than the default limit per subnet.
 func WithCIDRLimit(ipv4 []CIDRLimit, ipv6 []CIDRLimit) Option {
 	return func(rm *resourceManager) error {
 		if ipv4 != nil {
@@ -83,8 +84,11 @@ func WithCIDRLimit(ipv4 []CIDRLimit, ipv6 []CIDRLimit) Option {
 	}
 }
 
-// WithLimitPeersPerSubnet sets the limits for the number of connections allowed per subnet.
-func WithLimitPeersPerSubnet(ipv4 []ConnLimitPerSubnet, ipv6 []ConnLimitPerSubnet) Option {
+// WithLimitPerSubnet sets the limits for the number of connections allowed per
+// subnet. This will limit the number of connections per subnet if that subnet
+// is not defined in the CIDR limit option. Think of this as a default limit for
+// any given subnet.
+func WithLimitPerSubnet(ipv4 []ConnLimitPerSubnet, ipv6 []ConnLimitPerSubnet) Option {
 	return func(rm *resourceManager) error {
 		if ipv4 != nil {
 			rm.connLimiter.connLimitPerSubnetV4 = ipv4
@@ -121,6 +125,18 @@ func newConnLimiter() *connLimiter {
 
 		connLimitPerSubnetV4: []ConnLimitPerSubnet{defaultIP4Limit},
 		connLimitPerSubnetV6: defaultIP6Limits,
+	}
+}
+
+func (cl *connLimiter) addCIDRLimit(isIP6 bool, cidrLimit CIDRLimit) {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	if isIP6 {
+		cl.cidrLimitV6 = append(cl.cidrLimitV6, cidrLimit)
+		cl.cidrLimitV6 = sortCIDRLimits(cl.cidrLimitV6)
+	} else {
+		cl.cidrLimitV4 = append(cl.cidrLimitV4, cidrLimit)
+		cl.cidrLimitV4 = sortCIDRLimits(cl.cidrLimitV4)
 	}
 }
 
