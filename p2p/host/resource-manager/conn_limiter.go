@@ -160,6 +160,11 @@ func (cl *connLimiter) addConn(ip netip.Addr) bool {
 	if len(connsPerNetworkPrefix) == 0 && len(networkPrefixLimits) > 0 {
 		// Initialize the counts
 		connsPerNetworkPrefix = make([]int, len(networkPrefixLimits))
+		if isIP6 {
+			cl.connsPerNetworkPrefixV6 = connsPerNetworkPrefix
+		} else {
+			cl.connsPerNetworkPrefixV4 = connsPerNetworkPrefix
+		}
 	}
 
 	for i, limit := range networkPrefixLimits {
@@ -168,12 +173,8 @@ func (cl *connLimiter) addConn(ip netip.Addr) bool {
 				return false
 			}
 			connsPerNetworkPrefix[i]++
-			if isIP6 {
-				cl.connsPerNetworkPrefixV6 = connsPerNetworkPrefix
-			} else {
-				cl.connsPerNetworkPrefixV4 = connsPerNetworkPrefix
-			}
-
+			// Done. If we find a match in the network prefix limits, we use
+			// that and don't use the general subnet limits.
 			return true
 		}
 	}
@@ -235,20 +236,20 @@ func (cl *connLimiter) rmConn(ip netip.Addr) {
 		// Initialize just in case. We should have already initialized in
 		// addConn, but if the callers calls rmConn first we don't want to panic
 		connsPerNetworkPrefix = make([]int, len(networkPrefixLimits))
+		if isIP6 {
+			cl.connsPerNetworkPrefixV6 = connsPerNetworkPrefix
+		} else {
+			cl.connsPerNetworkPrefixV4 = connsPerNetworkPrefix
+		}
 	}
 	for i, limit := range networkPrefixLimits {
 		if limit.Network.Contains(ip) {
 			count := connsPerNetworkPrefix[i]
 			if count <= 0 {
 				log.Errorf("unexpected conn count for ip %s. Was this not added with addConn first?", ip)
+				return
 			}
 			connsPerNetworkPrefix[i]--
-			if isIP6 {
-				cl.connsPerNetworkPrefixV6 = connsPerNetworkPrefix
-			} else {
-				cl.connsPerNetworkPrefixV4 = connsPerNetworkPrefix
-			}
-
 			// Done. We updated the count in the defined network prefix limit.
 			return
 		}
