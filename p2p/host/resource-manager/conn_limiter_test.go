@@ -80,7 +80,7 @@ func TestItLimits(t *testing.T) {
 		cl := &connLimiter{
 			networkPrefixLimitV4: DefaultNetworkPrefixLimitV4,
 			connLimitPerSubnetV4: []ConnLimitPerSubnet{
-				{BitMask: 0, ConnCount: 1}, // 1 connection for the whole IPv4 space
+				{PrefixLength: 0, ConnCount: 1}, // 1 connection for the whole IPv4 space
 			},
 		}
 

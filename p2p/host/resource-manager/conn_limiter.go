@@ -9,9 +9,9 @@ import (
 
 type ConnLimitPerSubnet struct {
 	// This defines how big the subnet is. For example, a /24 subnet has a
-	// BitMask of 24. All IPs that share the same 24 bit prefix are in the same
-	// subnet.  Are in the same subnet, and bound to the same limit.
-	BitMask int
+	// PrefixLength of 24. All IPs that share the same 24 bit prefix are in the same
+	// subnet. Are in the same subnet, and bound to the same limit.
+	PrefixLength int
 	// The maximum number of connections allowed for each subnet.
 	ConnCount int
 }
@@ -30,17 +30,17 @@ type NetworkPrefixLimit struct {
 var defaultMaxConcurrentConns = 8
 
 var defaultIP4Limit = ConnLimitPerSubnet{
-	ConnCount: defaultMaxConcurrentConns,
-	BitMask:   32,
+	ConnCount:    defaultMaxConcurrentConns,
+	PrefixLength: 32,
 }
 var defaultIP6Limits = []ConnLimitPerSubnet{
 	{
-		ConnCount: defaultMaxConcurrentConns,
-		BitMask:   56,
+		ConnCount:    defaultMaxConcurrentConns,
+		PrefixLength: 56,
 	},
 	{
-		ConnCount: 8 * defaultMaxConcurrentConns,
-		BitMask:   48,
+		ConnCount:    8 * defaultMaxConcurrentConns,
+		PrefixLength: 48,
 	},
 }
 
@@ -189,7 +189,7 @@ func (cl *connLimiter) addConn(ip netip.Addr) bool {
 	}
 
 	for i, limit := range limits {
-		prefix, err := ip.Prefix(limit.BitMask)
+		prefix, err := ip.Prefix(limit.PrefixLength)
 		if err != nil {
 			return false
 		}
@@ -208,7 +208,7 @@ func (cl *connLimiter) addConn(ip netip.Addr) bool {
 
 	// All limit checks passed, now we update the counts
 	for i, limit := range limits {
-		prefix, _ := ip.Prefix(limit.BitMask)
+		prefix, _ := ip.Prefix(limit.PrefixLength)
 		masked := prefix.String()
 		connsPerLimit[i][masked]++
 	}
@@ -267,7 +267,7 @@ func (cl *connLimiter) rmConn(ip netip.Addr) {
 	}
 
 	for i, limit := range limits {
-		prefix, err := ip.Prefix(limit.BitMask)
+		prefix, err := ip.Prefix(limit.PrefixLength)
 		if err != nil {
 			// Unexpected since we should have seen this IP before in addConn
 			log.Errorf("unexpected error getting prefix: %v", err)
