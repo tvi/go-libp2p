@@ -316,30 +316,16 @@ func (r *resourceManager) nextStreamId() int64 {
 	return r.streamId
 }
 
-func hasIPInMultiaddr(addr multiaddr.Multiaddr) bool {
-	foundIP := false
-	multiaddr.ForEach(addr, func(c multiaddr.Component) bool {
-		switch c.Protocol().Code {
-		case multiaddr.P_IP4, multiaddr.P_IP6:
-			foundIP = true
-			return false
-		default:
-			return true
-		}
-	})
-	return foundIP
+// OpenConnectionNoIP is deprecated and will be removed in the next release
+func (r *resourceManager) OpenConnectionNoIP(dir network.Direction, usefd bool, endpoint multiaddr.Multiaddr) (network.ConnManagementScope, error) {
+	return r.openConnection(dir, usefd, endpoint, netip.Addr{})
 }
 
 func (r *resourceManager) OpenConnection(dir network.Direction, usefd bool, endpoint multiaddr.Multiaddr) (network.ConnManagementScope, error) {
-	if !hasIPInMultiaddr(endpoint) {
-		// We don't have IP information but we still want to limit the
-		// connection by other scopes.
-		return r.openConnection(dir, usefd, endpoint, netip.Addr{})
-	}
-
 	ip, err := manet.ToIP(endpoint)
 	if err != nil {
-		return nil, err
+		// No IP address
+		return r.openConnection(dir, usefd, endpoint, netip.Addr{})
 	}
 
 	ipAddr, ok := netip.AddrFromSlice(ip)
