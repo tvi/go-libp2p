@@ -316,28 +316,25 @@ func (r *resourceManager) nextStreamId() int64 {
 	return r.streamId
 }
 
-// OpenConnectionNoIP is like OpenConnection, but does not use IP information.
-// Used when we still want to limit the connection by other scopes, but don't
-// have IP information like when we are relaying.
-func (r *resourceManager) OpenConnectionNoIP(dir network.Direction, usefd bool, endpoint multiaddr.Multiaddr) (network.ConnManagementScope, error) {
-	return r.openConnection(dir, usefd, endpoint, netip.Addr{})
+func hasIPInMultiaddr(addr multiaddr.Multiaddr) bool {
+	foundIP := false
+	multiaddr.ForEach(addr, func(c multiaddr.Component) bool {
+		switch c.Protocol().Code {
+		case multiaddr.P_IP4, multiaddr.P_IP6:
+			foundIP = true
+			return false
+		default:
+			return true
+		}
+	})
+	return foundIP
 }
 
 func (r *resourceManager) OpenConnection(dir network.Direction, usefd bool, endpoint multiaddr.Multiaddr) (network.ConnManagementScope, error) {
-	// Temporary workaround to provide backwards compatibility for users that
-	// implement the ResourceManager interface by wrapping this implementation,
-	// but do not provide an OpenConnectionNoIP method.
-	//
-	// Only circuitv2 opens an connection without an
-	// IP address in the multiaddr. The circuitv2 transport checks if there is
-	// an OpenConnectionNoIP method, but will fallback to just calling
-	// OpenConnection if not. If a user wrapped this implementation, their
-	// wrapper won't have an OpenConnectionNoIP.  And without this check it
-	// would error in the `manet.ToIP` below.  This is a workaround. The next
-	// version will add OpenConnectionNoIP to the ResourceManager interface. But
-	// that is a breaking change
-	if _, err := endpoint.ValueForProtocol(multiaddr.P_CIRCUIT); err == nil {
-		return r.OpenConnectionNoIP(dir, usefd, endpoint)
+	if !hasIPInMultiaddr(endpoint) {
+		// We don't have IP information but we still want to limit the
+		// connection by other scopes.
+		return r.openConnection(dir, usefd, endpoint, netip.Addr{})
 	}
 
 	ip, err := manet.ToIP(endpoint)
