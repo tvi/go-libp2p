@@ -16,8 +16,8 @@ type ConnLimitPerSubnet struct {
 	ConnCount int
 }
 
-type CIDRLimit struct {
-	// The CIDR prefix for which this limit applies.
+type NetworkPrefixLimit struct {
+	// The Network prefix for which this limit applies.
 	Network netip.Prefix
 
 	// The maximum number of connections allowed for this subnet.
@@ -44,14 +44,14 @@ var defaultIP6Limits = []ConnLimitPerSubnet{
 	},
 }
 
-var DefaultCIDRLimitV4 = sortCIDRLimits([]CIDRLimit{
+var DefaultNetworkPrefixLimitV4 = sortNetworkPrefixes([]NetworkPrefixLimit{
 	{
 		// Loopback address for v4 https://datatracker.ietf.org/doc/html/rfc6890#section-2.2.2
 		Network:   netip.MustParsePrefix("127.0.0.0/8"),
 		ConnCount: math.MaxInt, // Unlimited
 	},
 })
-var DefaultCIDRLimitV6 = sortCIDRLimits([]CIDRLimit{
+var DefaultNetworkPrefixLimitV6 = sortNetworkPrefixes([]NetworkPrefixLimit{
 	{
 		// Loopback address for v6 https://datatracker.ietf.org/doc/html/rfc6890#section-2.2.3
 		Network:   netip.MustParsePrefix("::1/128"),
@@ -59,26 +59,26 @@ var DefaultCIDRLimitV6 = sortCIDRLimits([]CIDRLimit{
 	},
 })
 
-// CIDR limits must be sorted by most specific to least specific.  This lets us
+// Network prefixes limits must be sorted by most specific to least specific.  This lets us
 // actually use the more specific limits, otherwise only the less specific ones
 // would be matched. e.g. 1.2.3.0/24 must come before 1.2.0.0/16.
-func sortCIDRLimits(limits []CIDRLimit) []CIDRLimit {
-	slices.SortStableFunc(limits, func(a, b CIDRLimit) int {
+func sortNetworkPrefixes(limits []NetworkPrefixLimit) []NetworkPrefixLimit {
+	slices.SortStableFunc(limits, func(a, b NetworkPrefixLimit) int {
 		return b.Network.Bits() - a.Network.Bits()
 	})
 	return limits
 }
 
-// WithCIDRLimit sets the limits for the number of connections allowed for a
-// specific CIDR address block. Use this when you want to set higher limits for
-// a specific subnet than the default limit per subnet.
-func WithCIDRLimit(ipv4 []CIDRLimit, ipv6 []CIDRLimit) Option {
+// WithNetworkPrefixLimit sets the limits for the number of connections allowed
+// for a specific Network Prefix. Use this when you want to set higher limits
+// for a specific subnet than the default limit per subnet.
+func WithNetworkPrefixLimit(ipv4 []NetworkPrefixLimit, ipv6 []NetworkPrefixLimit) Option {
 	return func(rm *resourceManager) error {
 		if ipv4 != nil {
-			rm.connLimiter.cidrLimitV4 = sortCIDRLimits(ipv4)
+			rm.connLimiter.networkPrefixLimitV4 = sortNetworkPrefixes(ipv4)
 		}
 		if ipv6 != nil {
-			rm.connLimiter.cidrLimitV6 = sortCIDRLimits(ipv6)
+			rm.connLimiter.networkPrefixLimitV6 = sortNetworkPrefixes(ipv6)
 		}
 		return nil
 	}
@@ -86,8 +86,8 @@ func WithCIDRLimit(ipv4 []CIDRLimit, ipv6 []CIDRLimit) Option {
 
 // WithLimitPerSubnet sets the limits for the number of connections allowed per
 // subnet. This will limit the number of connections per subnet if that subnet
-// is not defined in the CIDR limit option. Think of this as a default limit for
-// any given subnet.
+// is not defined in the NetworkPrefixLimit option. Think of this as a default
+// limit for any given subnet.
 func WithLimitPerSubnet(ipv4 []ConnLimitPerSubnet, ipv6 []ConnLimitPerSubnet) Option {
 	return func(rm *resourceManager) error {
 		if ipv4 != nil {
@@ -103,13 +103,13 @@ func WithLimitPerSubnet(ipv4 []ConnLimitPerSubnet, ipv6 []ConnLimitPerSubnet) Op
 type connLimiter struct {
 	mu sync.Mutex
 
-	// Specific CIDR limits. If these are set, they take precedence over the
+	// Specific Network Prefix limits. If these are set, they take precedence over the
 	// subnet limits.
 	// These must be sorted by most specific to least specific.
-	cidrLimitV4    []CIDRLimit
-	cidrLimitV6    []CIDRLimit
-	connsPerCIDRV4 []int
-	connsPerCIDRV6 []int
+	networkPrefixLimitV4    []NetworkPrefixLimit
+	networkPrefixLimitV6    []NetworkPrefixLimit
+	connsPerNetworkPrefixV4 []int
+	connsPerNetworkPrefixV6 []int
 
 	// Subnet limits.
 	connLimitPerSubnetV4 []ConnLimitPerSubnet
@@ -120,23 +120,23 @@ type connLimiter struct {
 
 func newConnLimiter() *connLimiter {
 	return &connLimiter{
-		cidrLimitV4: DefaultCIDRLimitV4,
-		cidrLimitV6: DefaultCIDRLimitV6,
+		networkPrefixLimitV4: DefaultNetworkPrefixLimitV4,
+		networkPrefixLimitV6: DefaultNetworkPrefixLimitV6,
 
 		connLimitPerSubnetV4: []ConnLimitPerSubnet{defaultIP4Limit},
 		connLimitPerSubnetV6: defaultIP6Limits,
 	}
 }
 
-func (cl *connLimiter) addCIDRLimit(isIP6 bool, cidrLimit CIDRLimit) {
+func (cl *connLimiter) addNetworkPrefixLimit(isIP6 bool, npLimit NetworkPrefixLimit) {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
 	if isIP6 {
-		cl.cidrLimitV6 = append(cl.cidrLimitV6, cidrLimit)
-		cl.cidrLimitV6 = sortCIDRLimits(cl.cidrLimitV6)
+		cl.networkPrefixLimitV6 = append(cl.networkPrefixLimitV6, npLimit)
+		cl.networkPrefixLimitV6 = sortNetworkPrefixes(cl.networkPrefixLimitV6)
 	} else {
-		cl.cidrLimitV4 = append(cl.cidrLimitV4, cidrLimit)
-		cl.cidrLimitV4 = sortCIDRLimits(cl.cidrLimitV4)
+		cl.networkPrefixLimitV4 = append(cl.networkPrefixLimitV4, npLimit)
+		cl.networkPrefixLimitV4 = sortNetworkPrefixes(cl.networkPrefixLimitV4)
 	}
 }
 
@@ -144,34 +144,34 @@ func (cl *connLimiter) addCIDRLimit(isIP6 bool, cidrLimit CIDRLimit) {
 func (cl *connLimiter) addConn(ip netip.Addr) bool {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
-	cidrLimits := cl.cidrLimitV4
-	connsPerCidr := cl.connsPerCIDRV4
+	networkPrefixLimits := cl.networkPrefixLimitV4
+	connsPerNetworkPrefix := cl.connsPerNetworkPrefixV4
 	limits := cl.connLimitPerSubnetV4
 	connsPerLimit := cl.ip4connsPerLimit
 	isIP6 := ip.Is6()
 	if isIP6 {
-		cidrLimits = cl.cidrLimitV6
-		connsPerCidr = cl.connsPerCIDRV6
+		networkPrefixLimits = cl.networkPrefixLimitV6
+		connsPerNetworkPrefix = cl.connsPerNetworkPrefixV6
 		limits = cl.connLimitPerSubnetV6
 		connsPerLimit = cl.ip6connsPerLimit
 	}
 
-	// Check CIDR limits first
-	if len(connsPerCidr) == 0 && len(cidrLimits) > 0 {
+	// Check Network Prefix limits first
+	if len(connsPerNetworkPrefix) == 0 && len(networkPrefixLimits) > 0 {
 		// Initialize the counts
-		connsPerCidr = make([]int, len(cidrLimits))
+		connsPerNetworkPrefix = make([]int, len(networkPrefixLimits))
 	}
 
-	for i, limit := range cidrLimits {
+	for i, limit := range networkPrefixLimits {
 		if limit.Network.Contains(ip) {
-			if connsPerCidr[i]+1 > limit.ConnCount {
+			if connsPerNetworkPrefix[i]+1 > limit.ConnCount {
 				return false
 			}
-			connsPerCidr[i]++
+			connsPerNetworkPrefix[i]++
 			if isIP6 {
-				cl.connsPerCIDRV6 = connsPerCidr
+				cl.connsPerNetworkPrefixV6 = connsPerNetworkPrefix
 			} else {
-				cl.connsPerCIDRV4 = connsPerCidr
+				cl.connsPerNetworkPrefixV4 = connsPerNetworkPrefix
 			}
 
 			return true
@@ -218,39 +218,38 @@ func (cl *connLimiter) addConn(ip netip.Addr) bool {
 func (cl *connLimiter) rmConn(ip netip.Addr) {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
-	cidrLimits := cl.cidrLimitV4
-	connsPerCidr := cl.connsPerCIDRV4
+	networkPrefixLimits := cl.networkPrefixLimitV4
+	connsPerNetworkPrefix := cl.connsPerNetworkPrefixV4
 	limits := cl.connLimitPerSubnetV4
 	connsPerLimit := cl.ip4connsPerLimit
 	isIP6 := ip.Is6()
 	if isIP6 {
-		cidrLimits = cl.cidrLimitV6
-		connsPerCidr = cl.connsPerCIDRV6
+		networkPrefixLimits = cl.networkPrefixLimitV6
+		connsPerNetworkPrefix = cl.connsPerNetworkPrefixV6
 		limits = cl.connLimitPerSubnetV6
 		connsPerLimit = cl.ip6connsPerLimit
 	}
 
-	// Check CIDR limits first
-
-	if len(connsPerCidr) == 0 && len(cidrLimits) > 0 {
+	// Check NetworkPrefix limits first
+	if len(connsPerNetworkPrefix) == 0 && len(networkPrefixLimits) > 0 {
 		// Initialize just in case. We should have already initialized in
 		// addConn, but if the callers calls rmConn first we don't want to panic
-		connsPerCidr = make([]int, len(cidrLimits))
+		connsPerNetworkPrefix = make([]int, len(networkPrefixLimits))
 	}
-	for i, limit := range cidrLimits {
+	for i, limit := range networkPrefixLimits {
 		if limit.Network.Contains(ip) {
-			count := connsPerCidr[i]
+			count := connsPerNetworkPrefix[i]
 			if count <= 0 {
 				log.Errorf("unexpected conn count for ip %s. Was this not added with addConn first?", ip)
 			}
-			connsPerCidr[i]--
+			connsPerNetworkPrefix[i]--
 			if isIP6 {
-				cl.connsPerCIDRV6 = connsPerCidr
+				cl.connsPerNetworkPrefixV6 = connsPerNetworkPrefix
 			} else {
-				cl.connsPerCIDRV4 = connsPerCidr
+				cl.connsPerNetworkPrefixV4 = connsPerNetworkPrefix
 			}
 
-			// Done. We updated the count in the defined CIDR limit.
+			// Done. We updated the count in the defined network prefix limit.
 			return
 		}
 	}

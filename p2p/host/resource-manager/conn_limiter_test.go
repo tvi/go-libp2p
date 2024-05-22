@@ -78,7 +78,7 @@ func TestItLimits(t *testing.T) {
 
 	t.Run("IPv4 with localhost", func(t *testing.T) {
 		cl := &connLimiter{
-			cidrLimitV4: DefaultCIDRLimitV4,
+			networkPrefixLimitV4: DefaultNetworkPrefixLimitV4,
 			connLimitPerSubnetV4: []ConnLimitPerSubnet{
 				{BitMask: 0, ConnCount: 1}, // 1 connection for the whole IPv4 space
 			},
@@ -149,10 +149,10 @@ func FuzzConnLimiter(f *testing.F) {
 				addedCount += count
 			}
 		}
-		for _, count := range cl.connsPerCIDRV4 {
+		for _, count := range cl.connsPerNetworkPrefixV4 {
 			addedCount += count
 		}
-		for _, count := range cl.connsPerCIDRV6 {
+		for _, count := range cl.connsPerNetworkPrefixV6 {
 			addedCount += count
 		}
 		if addedCount == 0 && len(addedConns) > 0 {
@@ -174,10 +174,10 @@ func FuzzConnLimiter(f *testing.F) {
 				leftoverCount += count
 			}
 		}
-		for _, count := range cl.connsPerCIDRV4 {
+		for _, count := range cl.connsPerNetworkPrefixV4 {
 			addedCount += count
 		}
-		for _, count := range cl.connsPerCIDRV6 {
+		for _, count := range cl.connsPerNetworkPrefixV6 {
 			addedCount += count
 		}
 		if leftoverCount != 0 {
@@ -186,8 +186,8 @@ func FuzzConnLimiter(f *testing.F) {
 	})
 }
 
-func TestSortedCIDRLimits(t *testing.T) {
-	cidrLimits := []CIDRLimit{
+func TestSortedNetworkPrefixLimits(t *testing.T) {
+	npLimits := []NetworkPrefixLimit{
 		{
 			Network: netip.MustParsePrefix("1.2.0.0/16"),
 		},
@@ -198,8 +198,8 @@ func TestSortedCIDRLimits(t *testing.T) {
 			Network: netip.MustParsePrefix("1.2.3.4/32"),
 		},
 	}
-	cidrLimits = sortCIDRLimits(cidrLimits)
-	sorted := []CIDRLimit{
+	npLimits = sortNetworkPrefixes(npLimits)
+	sorted := []NetworkPrefixLimit{
 		{
 			Network: netip.MustParsePrefix("1.2.3.4/32"),
 		},
@@ -210,5 +210,5 @@ func TestSortedCIDRLimits(t *testing.T) {
 			Network: netip.MustParsePrefix("1.2.0.0/16"),
 		},
 	}
-	require.EqualValues(t, sorted, cidrLimits)
+	require.EqualValues(t, sorted, npLimits)
 }
