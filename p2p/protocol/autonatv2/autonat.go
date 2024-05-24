@@ -190,8 +190,10 @@ func (an *AutoNAT) updatePeer(p peer.ID) {
 	protos, err := an.host.Peerstore().SupportsProtocols(p, DialProtocol)
 	connectedness := an.host.Network().Connectedness(p)
 	if err == nil && slices.Contains(protos, DialProtocol) && connectedness == network.Connected {
+		fmt.Println("adding peer ", p)
 		an.peers.Put(p)
 	} else {
+		fmt.Println("removing peer", p)
 		an.peers.Delete(p)
 	}
 }

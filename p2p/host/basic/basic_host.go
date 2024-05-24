@@ -524,6 +524,10 @@ func (h *BasicHost) background() {
 	var lastAddrs []ma.Multiaddr
 
 	emitAddrChange := func(currentAddrs []ma.Multiaddr, lastAddrs []ma.Multiaddr) {
+
+		for _, a := range currentAddrs {
+			h.verifyAddr(a)
+		}
 		// nothing to do if both are nil..defensive check
 		if currentAddrs == nil && lastAddrs == nil {
 			return
@@ -562,6 +566,7 @@ func (h *BasicHost) background() {
 	ticker := time.NewTicker(addrChangeTickrInterval)
 	defer ticker.Stop()
 
+	st := time.Now()
 	for {
 		if len(h.network.ListenAddresses()) > 0 {
 			h.updateLocalIpAddr()
@@ -571,7 +576,9 @@ func (h *BasicHost) background() {
 		curr := h.Addrs()
 		emitAddrChange(curr, lastAddrs)
 		lastAddrs = curr
-
+		if time.Since(st) > 10*time.Second {
+			panic("done")
+		}
 		select {
 		case <-ticker.C:
 		case <-h.addrChangeChan:
@@ -579,6 +586,24 @@ func (h *BasicHost) background() {
 			return
 		}
 	}
+}
+
+func (h *BasicHost) verifyAddr(a ma.Multiaddr) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	p, err := peer.Decode("12D3KooWQRRjtVu8A45BGzdCQmTEkdST3U6NC29s79nrBaheut1T")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(p)
+	h.Peerstore().AddAddr(p, ma.StringCast("/ip4/146.190.178.58/tcp/4884/"), peerstore.PermanentAddrTTL)
+	err = h.Connect(ctx, peer.AddrInfo{ID: p})
+	if err != nil {
+		panic(err)
+	}
+	defer cancel()
+	res, err := h.autonatv2.GetReachability(ctx, []autonatv2.Request{{Addr: a, SendDialData: true}})
+	fmt.Printf("%+v", res)
+	fmt.Println(err)
 }
 
 // ID returns the (local) peer.ID associated with this Host
