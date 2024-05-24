@@ -577,7 +577,9 @@ func (h *BasicHost) background() {
 		emitAddrChange(curr, lastAddrs)
 		lastAddrs = curr
 		if time.Since(st) > 10*time.Second {
-			panic("done")
+			fmt.Println(h.Addrs())
+			fmt.Println(h.ID())
+			select {}
 		}
 		select {
 		case <-ticker.C:
