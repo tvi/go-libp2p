@@ -594,7 +594,7 @@ func (h *BasicHost) verifyAddr(a ma.Multiaddr) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(p)
+	h.Network().ClosePeer(p)
 	h.Peerstore().AddAddr(p, ma.StringCast("/ip4/146.190.178.58/tcp/4884/"), peerstore.PermanentAddrTTL)
 	err = h.Connect(ctx, peer.AddrInfo{ID: p})
 	if err != nil {
@@ -602,8 +602,9 @@ func (h *BasicHost) verifyAddr(a ma.Multiaddr) {
 	}
 	defer cancel()
 	res, err := h.autonatv2.GetReachability(ctx, []autonatv2.Request{{Addr: a, SendDialData: true}})
-	fmt.Printf("%+v", res)
+	fmt.Printf("%+v \n", res)
 	fmt.Println(err)
+	fmt.Println("============")
 }
 
 // ID returns the (local) peer.ID associated with this Host

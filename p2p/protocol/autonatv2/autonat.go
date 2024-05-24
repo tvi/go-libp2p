@@ -139,6 +139,7 @@ func (an *AutoNAT) background() {
 			an.wg.Done()
 			return
 		case e := <-an.sub.Out():
+			fmt.Println(e)
 			switch evt := e.(type) {
 			case event.EvtPeerProtocolsUpdated:
 				an.updatePeer(evt.Peer)
