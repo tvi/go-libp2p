@@ -86,6 +86,8 @@ func (ac *client) GetReachability(ctx context.Context, p peer.ID, reqs []Request
 		return Result{}, fmt.Errorf("dial msg read failed: %w", err)
 	}
 
+	fmt.Printf("response: %+v\n\n", msg)
+
 	switch {
 	case msg.GetDialResponse() != nil:
 		break
@@ -124,6 +126,7 @@ func (ac *client) GetReachability(ctx context.Context, p peer.ID, reqs []Request
 	}
 
 	resp := msg.GetDialResponse()
+	fmt.Printf("response: %+v\n\n", resp)
 	if resp.GetStatus() != pb.DialResponse_OK {
 		// E_DIAL_REFUSED has implication for deciding future address verificiation priorities
 		// wrap a distinct error for convenient errors.Is usage

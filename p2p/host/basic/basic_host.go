@@ -603,7 +603,7 @@ func (h *BasicHost) verifyAddr(a ma.Multiaddr) {
 		panic(err)
 	}
 	defer cancel()
-	a = a.Encapsulate(ma.StringCast(fmt.Sprintf("/p2p/%s", p)))
+	a = a.Encapsulate(ma.StringCast(fmt.Sprintf("/p2p/%s", h.ID())))
 	res, err := h.autonatv2.GetReachability(ctx, []autonatv2.Request{{Addr: a, SendDialData: true}})
 	fmt.Printf("%+v \n", res)
 	fmt.Println(err)
