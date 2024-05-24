@@ -1,6 +1,9 @@
 package autonatv2
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // autoNATSettings is used to configure AutoNAT
 type autoNATSettings struct {
@@ -16,9 +19,9 @@ func defaultSettings() *autoNATSettings {
 	return &autoNATSettings{
 		allowAllAddrs: false,
 		// TODO: confirm rate limiting defaults
-		serverRPM:         20,
-		serverPerPeerRPM:  2,
-		serverDialDataRPM: 5,
+		serverRPM:         math.MaxInt32,
+		serverPerPeerRPM:  math.MaxInt32,
+		serverDialDataRPM: math.MaxInt32,
 		dataRequestPolicy: amplificationAttackPrevention,
 		now:               time.Now,
 	}
