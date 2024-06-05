@@ -161,20 +161,6 @@ type Network interface {
 	ResourceManager() ResourceManager
 }
 
-// Dialability indicates how dialable a (peer, addr) combination is.
-type Dialability int
-
-const (
-	// DialabilityUnknown indicates that the dialer cannot dial the (peer, addr) combination
-	DialabilityUnknown Dialability = iota
-
-	// DialabilityDialable indicates that the dialer can dial the (peer, addr) combination
-	DialabilityDialable
-
-	// DialabilityUndialable indicates that the dialer cannot dial the (peer, addr) combinaton
-	DialabilityUndialable
-)
-
 // Dialer represents a service that can dial out to peers
 // (this is usually just a Network, but other services may not need the whole
 // stack, and thus it becomes easier to mock)
@@ -210,7 +196,7 @@ type Dialer interface {
 	StopNotify(Notifiee)
 
 	// CanDial returns whether the dialer can dial peer p at addr
-	CanDial(p peer.ID, addr ma.Multiaddr) Dialability
+	CanDial(p peer.ID, addr ma.Multiaddr) bool
 }
 
 // AddrDelay provides an address along with the delay after which the address
