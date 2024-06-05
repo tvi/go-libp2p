@@ -42,7 +42,7 @@ func newServer(host, dialer host.Host, s *autoNATSettings) *server {
 		dialerHost:            dialer,
 		host:                  host,
 		dialDataRequestPolicy: s.dataRequestPolicy,
-		allowPrivateAddrs:     s.allowAllAddrs,
+		allowPrivateAddrs:     s.allowPrivateAddrs,
 		limiter: &rateLimiter{
 			RPM:         s.serverRPM,
 			PerPeerRPM:  s.serverPerPeerRPM,
@@ -54,16 +54,12 @@ func newServer(host, dialer host.Host, s *autoNATSettings) *server {
 }
 
 // Enable attaches the stream handler to the host.
-func (as *server) Enable() {
+func (as *server) Start() {
 	as.host.SetStreamHandler(DialProtocol, as.handleDialRequest)
 }
 
-// Disable removes the stream handles from the host.
-func (as *server) Disable() {
-	as.host.RemoveStreamHandler(DialProtocol)
-}
-
 func (as *server) Close() {
+	as.host.RemoveStreamHandler(DialProtocol)
 	as.dialerHost.Close()
 }
 
@@ -120,7 +116,6 @@ func (as *server) handleDialRequest(s network.Stream) {
 		return
 	}
 
-	nonce := msg.GetDialRequest().Nonce
 	// parse peer's addresses
 	var dialAddr ma.Multiaddr
 	var addrIdx int
@@ -158,6 +153,8 @@ func (as *server) handleDialRequest(s network.Stream) {
 		}
 		return
 	}
+
+	nonce := msg.GetDialRequest().Nonce
 
 	isDialDataRequired := as.dialDataRequestPolicy(s, dialAddr)
 	if !as.limiter.AcceptDialDataRequest(p) {

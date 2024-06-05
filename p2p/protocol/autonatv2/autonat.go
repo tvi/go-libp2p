@@ -55,8 +55,6 @@ type Request struct {
 
 // Result is the result of the CheckReachability call
 type Result struct {
-	// Idx is the index of the dialed address
-	Idx int
 	// Addr is the dialed address
 	Addr ma.Multiaddr
 	// Reachability of the dialed address
@@ -70,7 +68,6 @@ type Result struct {
 // The server provides amplification attack prevention and rate limiting.
 type AutoNAT struct {
 	host host.Host
-	sub  event.Subscription
 
 	// for cleanly closing
 	ctx    context.Context
@@ -82,10 +79,9 @@ type AutoNAT struct {
 
 	mx    sync.Mutex
 	peers *peersMap
-
-	// allowAllAddrs enables using private and localhost addresses for reachability checks.
+	// allowPrivateAddrs enables using private and localhost addresses for reachability checks.
 	// This is only useful for testing.
-	allowAllAddrs bool
+	allowPrivateAddrs bool
 }
 
 // New returns a new AutoNAT instance.
@@ -98,47 +94,28 @@ func New(host host.Host, dialerHost host.Host, opts ...AutoNATOption) (*AutoNAT,
 			return nil, fmt.Errorf("failed to apply option: %w", err)
 		}
 	}
-	// Listen on event.EvtPeerProtocolsUpdated, event.EvtPeerConnectednessChanged
-	// event.EvtPeerIdentificationCompleted to maintain our set of autonat supporting peers.
-	sub, err := host.EventBus().Subscribe([]interface{}{
-		new(event.EvtPeerProtocolsUpdated),
-		new(event.EvtPeerConnectednessChanged),
-		new(event.EvtPeerIdentificationCompleted),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("event subscription failed: %w", err)
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	an := &AutoNAT{
-		host:          host,
-		ctx:           ctx,
-		cancel:        cancel,
-		sub:           sub,
-		srv:           newServer(host, dialerHost, s),
-		cli:           newClient(host),
-		allowAllAddrs: s.allowAllAddrs,
-		peers:         newPeersMap(),
+		host:              host,
+		ctx:               ctx,
+		cancel:            cancel,
+		srv:               newServer(host, dialerHost, s),
+		cli:               newClient(host),
+		allowPrivateAddrs: s.allowPrivateAddrs,
+		peers:             newPeersMap(),
 	}
-	an.cli.RegisterDialBack()
-	an.srv.Enable()
-
-	an.wg.Add(1)
-	go an.background()
 	return an, nil
 }
 
-func (an *AutoNAT) background() {
+func (an *AutoNAT) background(sub event.Subscription) {
 	for {
 		select {
 		case <-an.ctx.Done():
-			an.srv.Disable()
-			an.srv.Close()
-			an.sub.Close()
-			an.peers = nil
+			sub.Close()
 			an.wg.Done()
 			return
-		case e := <-an.sub.Out():
+		case e := <-sub.Out():
 			switch evt := e.(type) {
 			case event.EvtPeerProtocolsUpdated:
 				an.updatePeer(evt.Peer)
@@ -151,14 +128,36 @@ func (an *AutoNAT) background() {
 	}
 }
 
+func (an *AutoNAT) Start() error {
+	// Listen on event.EvtPeerProtocolsUpdated, event.EvtPeerConnectednessChanged
+	// event.EvtPeerIdentificationCompleted to maintain our set of autonat supporting peers.
+	sub, err := an.host.EventBus().Subscribe([]interface{}{
+		new(event.EvtPeerProtocolsUpdated),
+		new(event.EvtPeerConnectednessChanged),
+		new(event.EvtPeerIdentificationCompleted),
+	})
+	if err != nil {
+		return fmt.Errorf("event subscription failed: %w", err)
+	}
+	an.cli.Start()
+	an.srv.Start()
+
+	an.wg.Add(1)
+	go an.background(sub)
+	return nil
+}
+
 func (an *AutoNAT) Close() {
 	an.cancel()
 	an.wg.Wait()
+	an.srv.Close()
+	an.cli.Close()
+	an.peers = nil
 }
 
 // GetReachability makes a single dial request for checking reachability for requested addresses
 func (an *AutoNAT) GetReachability(ctx context.Context, reqs []Request) (Result, error) {
-	if !an.allowAllAddrs {
+	if !an.allowPrivateAddrs {
 		for _, r := range reqs {
 			if !manet.IsPublicAddr(r.Addr) {
 				return Result{}, fmt.Errorf("private address cannot be verified by autonatv2: %s", r.Addr)

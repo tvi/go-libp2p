@@ -40,8 +40,8 @@ func newAutoNAT(t testing.TB, dialer host.Host, opts ...AutoNATOption) *AutoNAT 
 	if err != nil {
 		t.Error(err)
 	}
-	an.srv.Enable()
-	an.cli.RegisterDialBack()
+	an.Start()
+	t.Cleanup(an.Close)
 	return an
 }
 
@@ -92,7 +92,7 @@ func TestAutoNATPrivateAddr(t *testing.T) {
 }
 
 func TestClientRequest(t *testing.T) {
-	an := newAutoNAT(t, nil, allowAllAddrs)
+	an := newAutoNAT(t, nil, allowPrivateAddrs)
 	defer an.Close()
 	defer an.host.Close()
 
@@ -127,7 +127,7 @@ func TestClientRequest(t *testing.T) {
 }
 
 func TestClientServerError(t *testing.T) {
-	an := newAutoNAT(t, nil, allowAllAddrs)
+	an := newAutoNAT(t, nil, allowPrivateAddrs)
 	defer an.Close()
 	defer an.host.Close()
 
@@ -184,7 +184,7 @@ func TestClientServerError(t *testing.T) {
 }
 
 func TestClientDataRequest(t *testing.T) {
-	an := newAutoNAT(t, nil, allowAllAddrs)
+	an := newAutoNAT(t, nil, allowPrivateAddrs)
 	defer an.Close()
 	defer an.host.Close()
 
@@ -299,7 +299,7 @@ func TestClientDataRequest(t *testing.T) {
 }
 
 func TestClientDialBacks(t *testing.T) {
-	an := newAutoNAT(t, nil, allowAllAddrs)
+	an := newAutoNAT(t, nil, allowPrivateAddrs)
 	defer an.Close()
 	defer an.host.Close()
 
@@ -605,10 +605,10 @@ func TestAreAddrsConsistency(t *testing.T) {
 			success:   true,
 		},
 		{
-			name:      "nat64 match",
+			name:      "nat64",
 			localAddr: ma.StringCast("/ip6/1::1/tcp/12345"),
 			dialAddr:  ma.StringCast("/ip4/1.2.3.4/tcp/23232"),
-			success:   true,
+			success:   false,
 		},
 		{
 			name:      "simple mismatch",
@@ -623,8 +623,8 @@ func TestAreAddrsConsistency(t *testing.T) {
 			success:   false,
 		},
 		{
-			name:      "nat64 mismatch",
-			localAddr: ma.StringCast("/ip4/192.168.0.1/udp/12345/quic-v1"),
+			name:      "dns",
+			localAddr: ma.StringCast("/dns/lib.p2p/udp/12345/quic-v1"),
 			dialAddr:  ma.StringCast("/ip6/1::1/udp/123/quic-v1/"),
 			success:   false,
 		},

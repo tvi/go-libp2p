@@ -39,7 +39,7 @@ func (st blackHoleState) String() string {
 type BlackHoleFilter struct {
 	// N is
 	// 1. The minimum number of completed dials required before evaluating black hole state
-	// 2. the minimum number of requests after which we probe the state of the black hole in 
+	// 2. the minimum number of requests after which we probe the state of the black hole in
 	// blocked state
 	N int
 	// MinSuccesses is the minimum number of Success required in the last n dials
