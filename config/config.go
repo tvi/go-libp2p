@@ -134,6 +134,11 @@ type Config struct {
 	DisableIdentifyAddressDiscovery bool
 
 	DisableAutoNATv2 bool
+
+	UDPBlackHoleFilter        *swarm.BlackHoleFilter
+	CustomUDPBlackHoleFilter  bool
+	IPv6BlackHoleFilter       *swarm.BlackHoleFilter
+	CustomIPv6BlackHoleFilter bool
 }
 
 func (cfg *Config) makeSwarm(eventBus event.Bus, enableMetrics bool) (*swarm.Swarm, error) {
@@ -168,7 +173,10 @@ func (cfg *Config) makeSwarm(eventBus event.Bus, enableMetrics bool) (*swarm.Swa
 		return nil, err
 	}
 
-	opts := cfg.SwarmOpts
+	opts := append(cfg.SwarmOpts,
+		swarm.WithUDPBlackHoleFilter(cfg.UDPBlackHoleFilter),
+		swarm.WithIPv6BlackHoleFilter(cfg.IPv6BlackHoleFilter),
+	)
 	if cfg.Reporter != nil {
 		opts = append(opts, swarm.WithMetrics(cfg.Reporter))
 	}
@@ -196,7 +204,7 @@ func (cfg *Config) makeSwarm(eventBus event.Bus, enableMetrics bool) (*swarm.Swa
 	return swarm.NewSwarm(pid, cfg.Peerstore, eventBus, opts...)
 }
 
-func (cfg *Config) makeAutoNATHost() (host.Host, error) {
+func (cfg *Config) makeAutoNATV2Host() (host.Host, error) {
 	autonatPrivKey, _, err := crypto.GenerateEd25519Key(rand.Reader)
 	if err != nil {
 		return nil, err
@@ -207,21 +215,21 @@ func (cfg *Config) makeAutoNATHost() (host.Host, error) {
 	}
 
 	autoNatCfg := Config{
-		Transports:         cfg.Transports,
-		Muxers:             cfg.Muxers,
-		SecurityTransports: cfg.SecurityTransports,
-		Insecure:           cfg.Insecure,
-		PSK:                cfg.PSK,
-		ConnectionGater:    cfg.ConnectionGater,
-		Reporter:           cfg.Reporter,
-		PeerKey:            autonatPrivKey,
-		Peerstore:          ps,
-		DialRanker:         swarm.NoDelayDialRanker,
+		Transports:          cfg.Transports,
+		Muxers:              cfg.Muxers,
+		SecurityTransports:  cfg.SecurityTransports,
+		Insecure:            cfg.Insecure,
+		PSK:                 cfg.PSK,
+		ConnectionGater:     cfg.ConnectionGater,
+		Reporter:            cfg.Reporter,
+		PeerKey:             autonatPrivKey,
+		Peerstore:           ps,
+		DialRanker:          swarm.NoDelayDialRanker,
+		UDPBlackHoleFilter:  cfg.UDPBlackHoleFilter,
+		IPv6BlackHoleFilter: cfg.IPv6BlackHoleFilter,
 		SwarmOpts: []swarm.Option{
-			// Disable black hole detection on autonat dialers
-			// It is better to attempt a dial and fail for AutoNAT use cases
-			swarm.WithUDPBlackHoleConfig(false, 0, 0),
-			swarm.WithIPv6BlackHoleConfig(false, 0, 0),
+			// Don't update black hole state for failed autonat dials
+			swarm.WithReadOnlyBlackHoleDetector(),
 		},
 	}
 	fxopts, err := autoNatCfg.addTransports()
@@ -366,7 +374,7 @@ func (cfg *Config) addTransports() ([]fx.Option, error) {
 func (cfg *Config) newBasicHost(swrm *swarm.Swarm, eventBus event.Bus) (*bhost.BasicHost, error) {
 	var autonatv2Dialer host.Host
 	if !cfg.DisableAutoNATv2 {
-		ah, err := cfg.makeAutoNATHost()
+		ah, err := cfg.makeAutoNATV2Host()
 		if err != nil {
 			return nil, err
 		}
@@ -564,9 +572,8 @@ func (cfg *Config) addAutoNAT(h *bhost.BasicHost) error {
 			Peerstore:          ps,
 			DialRanker:         swarm.NoDelayDialRanker,
 			SwarmOpts: []swarm.Option{
-				// It is better to disable black hole detection and just attempt a dial for autonat
-				swarm.WithUDPBlackHoleConfig(false, 0, 0),
-				swarm.WithIPv6BlackHoleConfig(false, 0, 0),
+				swarm.WithUDPBlackHoleFilter(nil),
+				swarm.WithIPv6BlackHoleFilter(nil),
 			},
 		}
 
