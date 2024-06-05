@@ -28,13 +28,13 @@ func newTestRequests(addrs []ma.Multiaddr, sendDialData bool) (reqs []Request) {
 }
 
 func TestServerInvalidAddrsRejected(t *testing.T) {
-	c := newAutoNAT(t, nil, allowAllAddrs)
+	c := newAutoNAT(t, nil, allowPrivateAddrs)
 	defer c.Close()
 	defer c.host.Close()
 
 	t.Run("no transport", func(t *testing.T) {
 		dialer := bhost.NewBlankHost(swarmt.GenSwarm(t, swarmt.OptDisableQUIC, swarmt.OptDisableTCP))
-		an := newAutoNAT(t, dialer, allowAllAddrs)
+		an := newAutoNAT(t, dialer, allowPrivateAddrs)
 		defer an.Close()
 		defer an.host.Close()
 
@@ -96,7 +96,7 @@ func TestServerInvalidAddrsRejected(t *testing.T) {
 
 	t.Run("too many address", func(t *testing.T) {
 		dialer := bhost.NewBlankHost(swarmt.GenSwarm(t, swarmt.OptDisableTCP))
-		an := newAutoNAT(t, dialer, allowAllAddrs)
+		an := newAutoNAT(t, dialer, allowPrivateAddrs)
 		defer an.Close()
 		defer an.host.Close()
 
@@ -115,7 +115,7 @@ func TestServerInvalidAddrsRejected(t *testing.T) {
 
 	t.Run("msg too large", func(t *testing.T) {
 		dialer := bhost.NewBlankHost(swarmt.GenSwarm(t, swarmt.OptDisableTCP))
-		an := newAutoNAT(t, dialer, allowAllAddrs)
+		an := newAutoNAT(t, dialer, allowPrivateAddrs)
 		defer an.Close()
 		defer an.host.Close()
 
@@ -138,7 +138,7 @@ func TestServerDataRequest(t *testing.T) {
 	// server will skip all tcp addresses
 	dialer := bhost.NewBlankHost(swarmt.GenSwarm(t, swarmt.OptDisableTCP))
 	// ask for dial data for quic address
-	an := newAutoNAT(t, dialer, allowAllAddrs, withDataRequestPolicy(
+	an := newAutoNAT(t, dialer, allowPrivateAddrs, withDataRequestPolicy(
 		func(s network.Stream, dialAddr ma.Multiaddr) bool {
 			if _, err := dialAddr.ValueForProtocol(ma.P_QUIC_V1); err == nil {
 				return true
@@ -150,7 +150,7 @@ func TestServerDataRequest(t *testing.T) {
 	defer an.Close()
 	defer an.host.Close()
 
-	c := newAutoNAT(t, nil, allowAllAddrs)
+	c := newAutoNAT(t, nil, allowPrivateAddrs)
 	defer c.Close()
 	defer c.host.Close()
 
@@ -172,7 +172,6 @@ func TestServerDataRequest(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, Result{
-		Idx:          0,
 		Addr:         quicAddr,
 		Reachability: network.ReachabilityPublic,
 		Status:       pb.DialStatus_OK,
@@ -185,11 +184,11 @@ func TestServerDataRequest(t *testing.T) {
 }
 
 func TestServerDial(t *testing.T) {
-	an := newAutoNAT(t, nil, WithServerRateLimit(10, 10, 10), allowAllAddrs)
+	an := newAutoNAT(t, nil, WithServerRateLimit(10, 10, 10), allowPrivateAddrs)
 	defer an.Close()
 	defer an.host.Close()
 
-	c := newAutoNAT(t, nil, allowAllAddrs)
+	c := newAutoNAT(t, nil, allowPrivateAddrs)
 	defer c.Close()
 	defer c.host.Close()
 
@@ -203,7 +202,6 @@ func TestServerDial(t *testing.T) {
 			append([]Request{{Addr: unreachableAddr, SendDialData: true}}, newTestRequests(hostAddrs, false)...))
 		require.NoError(t, err)
 		require.Equal(t, Result{
-			Idx:          0,
 			Addr:         unreachableAddr,
 			Reachability: network.ReachabilityPrivate,
 			Status:       pb.DialStatus_E_DIAL_ERROR,
@@ -214,7 +212,6 @@ func TestServerDial(t *testing.T) {
 		res, err := c.GetReachability(context.Background(), newTestRequests(c.host.Addrs(), false))
 		require.NoError(t, err)
 		require.Equal(t, Result{
-			Idx:          0,
 			Addr:         hostAddrs[0],
 			Reachability: network.ReachabilityPublic,
 			Status:       pb.DialStatus_OK,
@@ -223,7 +220,6 @@ func TestServerDial(t *testing.T) {
 			res, err := c.GetReachability(context.Background(), newTestRequests([]ma.Multiaddr{addr}, false))
 			require.NoError(t, err)
 			require.Equal(t, Result{
-				Idx:          0,
 				Addr:         addr,
 				Reachability: network.ReachabilityPublic,
 				Status:       pb.DialStatus_OK,
@@ -236,7 +232,6 @@ func TestServerDial(t *testing.T) {
 		res, err := c.GetReachability(context.Background(), newTestRequests(c.host.Addrs(), false))
 		require.NoError(t, err)
 		require.Equal(t, Result{
-			Idx:          0,
 			Addr:         hostAddrs[0],
 			Reachability: network.ReachabilityUnknown,
 			Status:       pb.DialStatus_E_DIAL_BACK_ERROR,
@@ -327,7 +322,7 @@ func TestRateLimiterStress(t *testing.T) {
 }
 
 func FuzzServerDialRequest(f *testing.F) {
-	a := newAutoNAT(f, nil, allowAllAddrs, WithServerRateLimit(math.MaxInt32, math.MaxInt32, math.MaxInt32))
+	a := newAutoNAT(f, nil, allowPrivateAddrs, WithServerRateLimit(math.MaxInt32, math.MaxInt32, math.MaxInt32))
 	c := newAutoNAT(f, nil)
 	idAndWait(f, c, a)
 	// reduce the streamTimeout before running this. TODO: fix this

@@ -410,6 +410,12 @@ func (h *BasicHost) Start() {
 	h.psManager.Start()
 	h.refCount.Add(1)
 	h.ids.Start()
+	if h.autonatv2 != nil {
+		err := h.autonatv2.Start()
+		if err != nil {
+			log.Errorf("autonat v2 failed to start: %s", err)
+		}
+	}
 	go h.background()
 }
 

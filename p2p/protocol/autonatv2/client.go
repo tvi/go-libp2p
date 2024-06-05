@@ -33,9 +33,12 @@ func newClient(h host.Host) *client {
 	return &client{host: h, dialData: make([]byte, 4000), dialBackQueues: make(map[uint64]chan ma.Multiaddr)}
 }
 
-// RegisterDialBack registers the client to receive DialBack streams initiated by the server to send the nonce.
-func (ac *client) RegisterDialBack() {
+func (ac *client) Start() {
 	ac.host.SetStreamHandler(DialBackProtocol, ac.handleDialBack)
+}
+
+func (ac *client) Close() {
+	ac.host.RemoveStreamHandler(DialBackProtocol)
 }
 
 // GetReachability verifies address reachability with a AutoNAT v2 server p.
@@ -91,20 +94,10 @@ func (ac *client) GetReachability(ctx context.Context, p peer.ID, reqs []Request
 		break
 	// provide dial data if appropriate
 	case msg.GetDialDataRequest() != nil:
-		idx := int(msg.GetDialDataRequest().AddrIdx)
-		if idx >= len(reqs) { // invalid address index
+		if err := ac.validateDialDataRequest(reqs, &msg); err != nil {
 			s.Reset()
-			return Result{}, fmt.Errorf("dial data: addr index out of range: %d [0-%d)", idx, len(reqs))
+			return Result{}, fmt.Errorf("invalid dial data request: %w", err)
 		}
-		if msg.GetDialDataRequest().NumBytes > maxHandshakeSizeBytes { // data request is too high
-			s.Reset()
-			return Result{}, fmt.Errorf("dial data requested too high: %d", msg.GetDialDataRequest().NumBytes)
-		}
-		if !reqs[idx].SendDialData { // low priority addr
-			s.Reset()
-			return Result{}, fmt.Errorf("dial data requested for low priority addr: %s index %d", reqs[idx].Addr, idx)
-		}
-
 		// dial data request is valid and we want to send data
 		if err := ac.sendDialData(msg.GetDialDataRequest(), w, &msg); err != nil {
 			s.Reset()
@@ -155,6 +148,20 @@ func (ac *client) GetReachability(ctx context.Context, p peer.ID, reqs []Request
 	return ac.newResult(resp, reqs, dialBackAddr)
 }
 
+func (ac *client) validateDialDataRequest(reqs []Request, msg *pb.Message) error {
+	idx := int(msg.GetDialDataRequest().AddrIdx)
+	if idx >= len(reqs) { // invalid address index
+		return fmt.Errorf("addr index out of range: %d [0-%d)", idx, len(reqs))
+	}
+	if msg.GetDialDataRequest().NumBytes > maxHandshakeSizeBytes { // data request is too high
+		return fmt.Errorf("requested data too high: %d", msg.GetDialDataRequest().NumBytes)
+	}
+	if !reqs[idx].SendDialData { // low priority addr
+		return fmt.Errorf("low priority addr: %s index %d", reqs[idx].Addr, idx)
+	}
+	return nil
+}
+
 func (ac *client) newResult(resp *pb.DialResponse, reqs []Request, dialBackAddr ma.Multiaddr) (Result, error) {
 	idx := int(resp.AddrIdx)
 	addr := reqs[idx].Addr
@@ -166,7 +173,7 @@ func (ac *client) newResult(resp *pb.DialResponse, reqs []Request, dialBackAddr 
 			// the server is misinforming us about the address it successfully dialed
 			// either we received no dialback or the address on the dialback is inconsistent with
 			// what the server is telling us
-			return Result{}, fmt.Errorf("invalid repsonse: dialBackAddr: %s, respAddr: %s", dialBackAddr, addr)
+			return Result{}, fmt.Errorf("invalid response: dialBackAddr: %s, respAddr: %s", dialBackAddr, addr)
 		}
 		rch = network.ReachabilityPublic
 	case pb.DialStatus_E_DIAL_ERROR:
@@ -187,7 +194,6 @@ func (ac *client) newResult(resp *pb.DialResponse, reqs []Request, dialBackAddr 
 	}
 
 	return Result{
-		Idx:          idx,
 		Addr:         addr,
 		Reachability: rch,
 		Status:       resp.DialStatus,
@@ -293,11 +299,26 @@ func areAddrsConsistent(local, external ma.Multiaddr) bool {
 	}
 	for i := 0; i < len(localProtos); i++ {
 		if i == 0 {
-			if localProtos[i].Code == externalProtos[i].Code ||
-				localProtos[i].Code == ma.P_IP6 && externalProtos[i].Code == ma.P_IP4 /* NAT64 */ {
-				continue
+			switch externalProtos[i].Code {
+			case ma.P_DNS, ma.P_DNSADDR:
+				if localProtos[i].Code == ma.P_IP4 || localProtos[i].Code == ma.P_IP6 {
+					continue
+				}
+				return false
+			case ma.P_DNS4:
+				if localProtos[i].Code == ma.P_IP4 {
+					continue
+				}
+				return false
+			case ma.P_DNS6:
+				if localProtos[i].Code == ma.P_IP6 {
+					continue
+				}
+				return false
 			}
-			return false
+			if localProtos[i].Code != externalProtos[i].Code {
+				return false
+			}
 		} else {
 			if localProtos[i].Code != externalProtos[i].Code {
 				return false
