@@ -731,6 +731,7 @@ func TestResponseWriterShouldNotHaveCancelledContext(t *testing.T) {
 	closeNotifyCh := make(chan bool, 1)
 	httpHost.SetHTTPHandlerAtPath("/test", "/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Legacy code uses this to check if the connection was closed
+		//lint:ignore SA1019 This is a test to assert we do the right thing since Go HTTP stdlib depends on this.
 		ch := w.(http.CloseNotifier).CloseNotify()
 		select {
 		case <-ch:
