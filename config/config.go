@@ -417,9 +417,13 @@ func (cfg *Config) NewNode() (host.Host, error) {
 
 	var bh *bhost.BasicHost
 	fxopts = append(fxopts, fx.Invoke(func(bho *bhost.BasicHost) { bh = bho }))
+	hostStopped := make(chan struct{})
 	fxopts = append(fxopts, fx.Invoke(func(h *bhost.BasicHost, lifecycle fx.Lifecycle) {
 		lifecycle.Append(fx.StartHook(h.Start))
 		lifecycle.Append(fx.StopHook(h.Close))
+		lifecycle.Append(fx.StopHook(func() {
+			close(hostStopped)
+		}))
 	}))
 
 	var rh *routed.RoutedHost
@@ -443,9 +447,12 @@ func (cfg *Config) NewNode() (host.Host, error) {
 	}
 
 	go func() {
-		<-app.Done() // Listen for SIGINT or SIGTERM and close the host
-		log.Info("Shutting down libp2p host. Ctrl-c once more to exit...")
-		app.Stop(context.Background())
+		select {
+		case <-app.Done(): // Listen for SIGINT or SIGTERM and close the host
+			log.Info("Shutting down libp2p host. Ctrl-c once more to exit...")
+			app.Stop(context.Background())
+		case <-hostStopped: // host has stopped, we can return
+		}
 	}()
 
 	if cfg.Routing != nil {
