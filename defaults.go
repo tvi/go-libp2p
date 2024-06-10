@@ -137,13 +137,13 @@ var DefaultPrometheusRegisterer = func(cfg *Config) error {
 var defaultUDPBlackHoleDetector = func(cfg *Config) error {
 	// A black hole is a binary property. On a network if UDP dials are blocked, all dials will
 	// fail. So a low success rate of 5 out 100 dials is good enough.
-	return cfg.Apply(UDPBlackHoleFilter(&swarm.BlackHoleFilter{N: 100, MinSuccesses: 5, Name: "UDP"}))
+	return cfg.Apply(UDPBlackHoleSuccessCounter(&swarm.BlackHoleSuccessCounter{N: 100, MinSuccesses: 5, Name: "UDP"}))
 }
 
 var defaultIPv6BlackHoleDetector = func(cfg *Config) error {
 	// A black hole is a binary property. On a network if there is no IPv6 connectivity, all
 	// dials will fail. So a low success rate of 5 out 100 dials is good enough.
-	return cfg.Apply(IPv6BlackHoleFilter(&swarm.BlackHoleFilter{N: 100, MinSuccesses: 5, Name: "IPv6"}))
+	return cfg.Apply(IPv6BlackHoleSuccessCounter(&swarm.BlackHoleSuccessCounter{N: 100, MinSuccesses: 5, Name: "IPv6"}))
 }
 
 // Complete list of default options and when to fallback on them.
@@ -204,13 +204,13 @@ var defaults = []struct {
 	},
 	{
 		fallback: func(cfg *Config) bool {
-			return !cfg.CustomUDPBlackHoleFilter && cfg.UDPBlackHoleFilter == nil
+			return !cfg.CustomUDPBlackHoleSuccessCounter && cfg.UDPBlackHoleSuccessCounter == nil
 		},
 		opt: defaultUDPBlackHoleDetector,
 	},
 	{
 		fallback: func(cfg *Config) bool {
-			return !cfg.CustomIPv6BlackHoleFilter && cfg.IPv6BlackHoleFilter == nil
+			return !cfg.CustomIPv6BlackHoleSuccessCounter && cfg.IPv6BlackHoleSuccessCounter == nil
 		},
 		opt: defaultIPv6BlackHoleDetector,
 	},

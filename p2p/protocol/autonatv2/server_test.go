@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -283,41 +285,56 @@ func TestRateLimiter(t *testing.T) {
 
 func TestRateLimiterStress(t *testing.T) {
 	cl := test.NewMockClock()
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		r := rateLimiter{RPM: 20 + i, PerPeerRPM: 10 + i, DialDataRPM: i, now: cl.Now}
 
 		peers := make([]peer.ID, 10+i)
 		for i := 0; i < len(peers); i++ {
 			peers[i] = peer.ID(fmt.Sprintf("peer-%d", i))
 		}
-		peerSuccesses := make([]int, len(peers))
-		success := 0
-		dialDataSuccesses := 0
-		for i := 0; i < 10*60; i++ {
-			for j, p := range peers {
-				if r.Accept(p) {
-					success++
-					peerSuccesses[j]++
+		peerSuccesses := make([]atomic.Int64, len(peers))
+		var success, dialDataSuccesses atomic.Int64
+		var wg sync.WaitGroup
+		for k := 0; k < 5; k++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := 0; i < 2*60; i++ {
+					for j, p := range peers {
+						if r.Accept(p) {
+							success.Add(1)
+							peerSuccesses[j].Add(1)
+						}
+						if r.AcceptDialDataRequest(p) {
+							dialDataSuccesses.Add(1)
+						}
+						r.CompleteRequest(p)
+					}
+					cl.AdvanceBy(time.Second)
 				}
-				if r.AcceptDialDataRequest(p) {
-					dialDataSuccesses++
-				}
-				r.CompleteRequest(p)
-			}
-			cl.AdvanceBy(time.Second)
+			}()
 		}
-		if success > 10*r.RPM || success < 9*r.RPM {
-			t.Fatalf("too many successes, RPM=%d", r.RPM)
+		wg.Wait()
+		if int(success.Load()) > 10*r.RPM || int(success.Load()) < 9*r.RPM {
+			t.Fatalf("invalid successes, %d, expected %d-%d", success.Load(), 9*r.RPM, 10*r.RPM)
 		}
-		if dialDataSuccesses > 10*r.DialDataRPM || dialDataSuccesses < 9*r.DialDataRPM {
-			t.Fatalf("too may dial data successes, DialDataRPM=%d", r.DialDataRPM)
+		if int(dialDataSuccesses.Load()) > 10*r.DialDataRPM || int(dialDataSuccesses.Load()) < 9*r.DialDataRPM {
+			t.Fatalf("invalid dial data successes, %d expected %d-%d", dialDataSuccesses.Load(), 9*r.DialDataRPM, 10*r.DialDataRPM)
 		}
-		for _, s := range peerSuccesses {
+		for i := range peerSuccesses {
 			// We cannot check the lower bound because some peers would be hitting the global rpm limit
-			if s > 10*r.PerPeerRPM {
+			if int(peerSuccesses[i].Load()) > 10*r.PerPeerRPM {
 				t.Fatalf("too many per peer successes, PerPeerRPM=%d", r.PerPeerRPM)
 			}
 		}
+		cl.AdvanceBy(1 * time.Minute)
+		require.True(t, r.Accept(peers[0]))
+		// Assert lengths to check that we are cleaning up correctly
+		require.Equal(t, len(r.reqs), 1)
+		require.Equal(t, len(r.peerReqs), 1)
+		require.Equal(t, len(r.peerReqs[peers[0]]), 1)
+		require.Equal(t, len(r.dialDataReqs), 0)
+		require.Equal(t, len(r.ongoingReqs), 1)
 	}
 }
 

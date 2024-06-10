@@ -112,20 +112,20 @@ func WithDialRanker(d network.DialRanker) Option {
 	}
 }
 
-// WithUDPBlackHoleFilter configures swarm to use the provided config for UDP black hole detection
+// WithUDPBlackHoleSuccessCounter configures swarm to use the provided config for UDP black hole detection
 // n is the size of the sliding window used to evaluate black hole state
 // min is the minimum number of successes out of n required to not block requests
-func WithUDPBlackHoleFilter(f *BlackHoleFilter) Option {
+func WithUDPBlackHoleSuccessCounter(f *BlackHoleSuccessCounter) Option {
 	return func(s *Swarm) error {
 		s.udpBHF = f
 		return nil
 	}
 }
 
-// WithIPv6BlackHoleFilter configures swarm to use the provided config for IPv6 black hole detection
+// WithIPv6BlackHoleSuccessCounter configures swarm to use the provided config for IPv6 black hole detection
 // n is the size of the sliding window used to evaluate black hole state
 // min is the minimum number of successes out of n required to not block requests
-func WithIPv6BlackHoleFilter(f *BlackHoleFilter) Option {
+func WithIPv6BlackHoleSuccessCounter(f *BlackHoleSuccessCounter) Option {
 	return func(s *Swarm) error {
 		s.ipv6BHF = f
 		return nil
@@ -215,8 +215,8 @@ type Swarm struct {
 	dialRanker network.DialRanker
 
 	connectednessEventEmitter *connectednessEventEmitter
-	udpBHF                    *BlackHoleFilter
-	ipv6BHF                   *BlackHoleFilter
+	udpBHF                    *BlackHoleSuccessCounter
+	ipv6BHF                   *BlackHoleSuccessCounter
 	bhd                       *blackHoleDetector
 	readOnlyBHD               bool
 }
@@ -242,8 +242,8 @@ func NewSwarm(local peer.ID, peers peerstore.Peerstore, eventBus event.Bus, opts
 		// A black hole is a binary property. On a network if UDP dials are blocked or there is
 		// no IPv6 connectivity, all dials will fail. So a low success rate of 5 out 100 dials
 		// is good enough.
-		udpBHF:  &BlackHoleFilter{N: 100, MinSuccesses: 5, Name: "UDP"},
-		ipv6BHF: &BlackHoleFilter{N: 100, MinSuccesses: 5, Name: "IPv6"},
+		udpBHF:  &BlackHoleSuccessCounter{N: 100, MinSuccesses: 5, Name: "UDP"},
+		ipv6BHF: &BlackHoleSuccessCounter{N: 100, MinSuccesses: 5, Name: "IPv6"},
 	}
 
 	s.conns.m = make(map[peer.ID][]*Conn)
