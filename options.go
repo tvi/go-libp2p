@@ -610,28 +610,28 @@ func DisableIdentifyAddressDiscovery() Option {
 	}
 }
 
-// DisableAutoNATv2 disables autonat
-func DisableAutoNATv2() Option {
+// EnableAutoNATv2 enables autonat v2
+func EnableAutoNATv2() Option {
 	return func(cfg *Config) error {
-		cfg.DisableAutoNATv2 = true
+		cfg.EnableAutoNATv2 = true
 		return nil
 	}
 }
 
-// UDPBlackHoleFilter configures libp2p to use f as the black hole filter for UDP addrs
-func UDPBlackHoleFilter(f *swarm.BlackHoleFilter) Option {
+// UDPBlackHoleSuccessCounter configures libp2p to use f as the black hole filter for UDP addrs
+func UDPBlackHoleSuccessCounter(f *swarm.BlackHoleSuccessCounter) Option {
 	return func(cfg *Config) error {
-		cfg.UDPBlackHoleFilter = f
-		cfg.CustomUDPBlackHoleFilter = true
+		cfg.UDPBlackHoleSuccessCounter = f
+		cfg.CustomUDPBlackHoleSuccessCounter = true
 		return nil
 	}
 }
 
-// IPv6BlackHoleFilter configures libp2p to use f as the black hole filter for IPv6 addrs
-func IPv6BlackHoleFilter(f *swarm.BlackHoleFilter) Option {
+// IPv6BlackHoleSuccessCounter configures libp2p to use f as the black hole filter for IPv6 addrs
+func IPv6BlackHoleSuccessCounter(f *swarm.BlackHoleSuccessCounter) Option {
 	return func(cfg *Config) error {
-		cfg.IPv6BlackHoleFilter = f
-		cfg.CustomIPv6BlackHoleFilter = true
+		cfg.IPv6BlackHoleSuccessCounter = f
+		cfg.CustomIPv6BlackHoleSuccessCounter = true
 		return nil
 	}
 }

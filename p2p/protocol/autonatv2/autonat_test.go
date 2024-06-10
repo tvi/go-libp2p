@@ -33,8 +33,8 @@ func newAutoNAT(t testing.TB, dialer host.Host, opts ...AutoNATOption) *AutoNAT 
 		dialer = bhost.NewBlankHost(
 			swarmt.GenSwarm(t,
 				swarmt.WithSwarmOpts(
-					swarm.WithUDPBlackHoleFilter(nil),
-					swarm.WithIPv6BlackHoleFilter(nil))))
+					swarm.WithUDPBlackHoleSuccessCounter(nil),
+					swarm.WithIPv6BlackHoleSuccessCounter(nil))))
 	}
 	an, err := New(h, dialer, opts...)
 	if err != nil {

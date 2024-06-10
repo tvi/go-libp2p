@@ -287,13 +287,13 @@ func (ac *client) handleDialBack(s network.Stream) {
 	}
 }
 
-func areAddrsConsistent(local, external ma.Multiaddr) bool {
-	if local == nil || external == nil {
+func areAddrsConsistent(connLocalAddr, dialedAddr ma.Multiaddr) bool {
+	if connLocalAddr == nil || dialedAddr == nil {
 		return false
 	}
 
-	localProtos := local.Protocols()
-	externalProtos := external.Protocols()
+	localProtos := connLocalAddr.Protocols()
+	externalProtos := dialedAddr.Protocols()
 	if len(localProtos) != len(externalProtos) {
 		return false
 	}

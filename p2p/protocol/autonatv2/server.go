@@ -61,6 +61,7 @@ func (as *server) Start() {
 func (as *server) Close() {
 	as.host.RemoveStreamHandler(DialProtocol)
 	as.dialerHost.Close()
+	as.limiter.Close()
 }
 
 // handleDialRequest is the dial-request protocol stream handler
@@ -157,7 +158,7 @@ func (as *server) handleDialRequest(s network.Stream) {
 	nonce := msg.GetDialRequest().Nonce
 
 	isDialDataRequired := as.dialDataRequestPolicy(s, dialAddr)
-	if !as.limiter.AcceptDialDataRequest(p) {
+	if isDialDataRequired && !as.limiter.AcceptDialDataRequest(p) {
 		msg = pb.Message{
 			Msg: &pb.Message_DialResponse{
 				DialResponse: &pb.DialResponse{
@@ -283,6 +284,7 @@ type rateLimiter struct {
 	DialDataRPM int
 
 	mu           sync.Mutex
+	closed       bool
 	reqs         []entry
 	peerReqs     map[peer.ID][]time.Time
 	dialDataReqs []time.Time
@@ -302,6 +304,9 @@ type entry struct {
 func (r *rateLimiter) Accept(p peer.ID) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closed {
+		return false
+	}
 	if r.peerReqs == nil {
 		r.peerReqs = make(map[peer.ID][]time.Time)
 		r.ongoingReqs = make(map[peer.ID]struct{})
@@ -326,6 +331,9 @@ func (r *rateLimiter) Accept(p peer.ID) bool {
 func (r *rateLimiter) AcceptDialDataRequest(p peer.ID) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closed {
+		return false
+	}
 	if r.peerReqs == nil {
 		r.peerReqs = make(map[peer.ID][]time.Time)
 		r.ongoingReqs = make(map[peer.ID]struct{})
@@ -378,8 +386,16 @@ func (r *rateLimiter) cleanup(now time.Time) {
 func (r *rateLimiter) CompleteRequest(p peer.ID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	delete(r.ongoingReqs, p)
+}
+
+func (r *rateLimiter) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closed = true
+	r.peerReqs = nil
+	r.ongoingReqs = nil
+	r.dialDataReqs = nil
 }
 
 // amplificationAttackPrevention is a dialDataRequestPolicy which requests data when the peer's observed

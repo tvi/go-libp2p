@@ -133,12 +133,12 @@ type Config struct {
 
 	DisableIdentifyAddressDiscovery bool
 
-	DisableAutoNATv2 bool
+	EnableAutoNATv2 bool
 
-	UDPBlackHoleFilter        *swarm.BlackHoleFilter
-	CustomUDPBlackHoleFilter  bool
-	IPv6BlackHoleFilter       *swarm.BlackHoleFilter
-	CustomIPv6BlackHoleFilter bool
+	UDPBlackHoleSuccessCounter        *swarm.BlackHoleSuccessCounter
+	CustomUDPBlackHoleSuccessCounter  bool
+	IPv6BlackHoleSuccessCounter       *swarm.BlackHoleSuccessCounter
+	CustomIPv6BlackHoleSuccessCounter bool
 }
 
 func (cfg *Config) makeSwarm(eventBus event.Bus, enableMetrics bool) (*swarm.Swarm, error) {
@@ -174,8 +174,8 @@ func (cfg *Config) makeSwarm(eventBus event.Bus, enableMetrics bool) (*swarm.Swa
 	}
 
 	opts := append(cfg.SwarmOpts,
-		swarm.WithUDPBlackHoleFilter(cfg.UDPBlackHoleFilter),
-		swarm.WithIPv6BlackHoleFilter(cfg.IPv6BlackHoleFilter),
+		swarm.WithUDPBlackHoleSuccessCounter(cfg.UDPBlackHoleSuccessCounter),
+		swarm.WithIPv6BlackHoleSuccessCounter(cfg.IPv6BlackHoleSuccessCounter),
 	)
 	if cfg.Reporter != nil {
 		opts = append(opts, swarm.WithMetrics(cfg.Reporter))
@@ -215,18 +215,18 @@ func (cfg *Config) makeAutoNATV2Host() (host.Host, error) {
 	}
 
 	autoNatCfg := Config{
-		Transports:          cfg.Transports,
-		Muxers:              cfg.Muxers,
-		SecurityTransports:  cfg.SecurityTransports,
-		Insecure:            cfg.Insecure,
-		PSK:                 cfg.PSK,
-		ConnectionGater:     cfg.ConnectionGater,
-		Reporter:            cfg.Reporter,
-		PeerKey:             autonatPrivKey,
-		Peerstore:           ps,
-		DialRanker:          swarm.NoDelayDialRanker,
-		UDPBlackHoleFilter:  cfg.UDPBlackHoleFilter,
-		IPv6BlackHoleFilter: cfg.IPv6BlackHoleFilter,
+		Transports:                  cfg.Transports,
+		Muxers:                      cfg.Muxers,
+		SecurityTransports:          cfg.SecurityTransports,
+		Insecure:                    cfg.Insecure,
+		PSK:                         cfg.PSK,
+		ConnectionGater:             cfg.ConnectionGater,
+		Reporter:                    cfg.Reporter,
+		PeerKey:                     autonatPrivKey,
+		Peerstore:                   ps,
+		DialRanker:                  swarm.NoDelayDialRanker,
+		UDPBlackHoleSuccessCounter:  cfg.UDPBlackHoleSuccessCounter,
+		IPv6BlackHoleSuccessCounter: cfg.IPv6BlackHoleSuccessCounter,
 		SwarmOpts: []swarm.Option{
 			// Don't update black hole state for failed autonat dials
 			swarm.WithReadOnlyBlackHoleDetector(),
@@ -373,7 +373,7 @@ func (cfg *Config) addTransports() ([]fx.Option, error) {
 
 func (cfg *Config) newBasicHost(swrm *swarm.Swarm, eventBus event.Bus) (*bhost.BasicHost, error) {
 	var autonatv2Dialer host.Host
-	if !cfg.DisableAutoNATv2 {
+	if cfg.EnableAutoNATv2 {
 		ah, err := cfg.makeAutoNATV2Host()
 		if err != nil {
 			return nil, err
@@ -395,7 +395,7 @@ func (cfg *Config) newBasicHost(swrm *swarm.Swarm, eventBus event.Bus) (*bhost.B
 		EnableMetrics:                   !cfg.DisableMetrics,
 		PrometheusRegisterer:            cfg.PrometheusRegisterer,
 		DisableIdentifyAddressDiscovery: cfg.DisableIdentifyAddressDiscovery,
-		EnableAutoNATv2:                 !cfg.DisableAutoNATv2,
+		EnableAutoNATv2:                 cfg.EnableAutoNATv2,
 		AutoNATv2Dialer:                 autonatv2Dialer,
 	})
 	if err != nil {
@@ -572,8 +572,8 @@ func (cfg *Config) addAutoNAT(h *bhost.BasicHost) error {
 			Peerstore:          ps,
 			DialRanker:         swarm.NoDelayDialRanker,
 			SwarmOpts: []swarm.Option{
-				swarm.WithUDPBlackHoleFilter(nil),
-				swarm.WithIPv6BlackHoleFilter(nil),
+				swarm.WithUDPBlackHoleSuccessCounter(nil),
+				swarm.WithIPv6BlackHoleSuccessCounter(nil),
 			},
 		}
 
