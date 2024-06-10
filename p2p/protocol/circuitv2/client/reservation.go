@@ -160,7 +160,7 @@ func Reserve(ctx context.Context, h host.Host, ai peer.AddrInfo) (*Reservation, 
 		if h.ID() != voucher.Peer {
 			return nil, ReservationError{
 				Status: pbv2.Status_MALFORMED_MESSAGE,
-				Reason: fmt.Sprintf("invalid voucher peer id: expected %s, got %s", signerPeerID, voucher.Peer),
+				Reason: fmt.Sprintf("invalid voucher peer id: expected %s, got %s", h.ID(), voucher.Peer),
 			}
 
 		}
