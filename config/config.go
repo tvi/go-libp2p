@@ -419,6 +419,7 @@ func (cfg *Config) NewNode() (host.Host, error) {
 	fxopts = append(fxopts, fx.Invoke(func(bho *bhost.BasicHost) { bh = bho }))
 	fxopts = append(fxopts, fx.Invoke(func(h *bhost.BasicHost, lifecycle fx.Lifecycle) {
 		lifecycle.Append(fx.StartHook(h.Start))
+		lifecycle.Append(fx.StopHook(h.Close))
 	}))
 
 	var rh *routed.RoutedHost
@@ -440,6 +441,12 @@ func (cfg *Config) NewNode() (host.Host, error) {
 		}
 		return nil, err
 	}
+
+	go func() {
+		<-app.Done() // Listen for SIGINT or SIGTERM and close the host
+		log.Info("Shutting down libp2p host. Ctrl-c once more to exit...")
+		app.Stop(context.Background())
+	}()
 
 	if cfg.Routing != nil {
 		return &closableRoutedHost{App: app, RoutedHost: rh}, nil
@@ -519,8 +526,7 @@ func (cfg *Config) addAutoNAT(h *bhost.BasicHost) error {
 		if err := app.Err(); err != nil {
 			return err
 		}
-		err = app.Start(context.Background())
-		if err != nil {
+		if err := app.Start(context.Background()); err != nil {
 			return err
 		}
 		go func() {
