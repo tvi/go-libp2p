@@ -44,7 +44,7 @@ require (
 	github.com/multiformats/go-varint v0.0.7
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pion/datachannel v1.5.6
-	github.com/pion/ice/v2 v2.3.24
+	github.com/pion/ice/v2 v2.3.25
 	github.com/pion/logging v0.2.2
 	github.com/pion/sctp v1.8.16
 	github.com/pion/stun v0.6.1
@@ -126,5 +126,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect
 )
-
-replace github.com/pion/ice/v2 => github.com/pion/ice/v2 v2.3.25-0.20240609174246-45043bdb58c3
