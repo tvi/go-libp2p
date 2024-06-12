@@ -16,9 +16,9 @@ func defaultSettings() *autoNATSettings {
 	return &autoNATSettings{
 		allowPrivateAddrs: false,
 		// TODO: confirm rate limiting defaults
-		serverRPM:         20,
-		serverPerPeerRPM:  2,
-		serverDialDataRPM: 5,
+		serverRPM:         600,
+		serverPerPeerRPM:  300,
+		serverDialDataRPM: 300,
 		dataRequestPolicy: amplificationAttackPrevention,
 		now:               time.Now,
 	}
