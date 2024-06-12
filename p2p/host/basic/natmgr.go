@@ -195,9 +195,6 @@ func (nmgr *natManager) doSync() {
 		}
 	}
 
-	var wg sync.WaitGroup
-	defer wg.Wait()
-
 	// Close old mappings
 	for e, v := range nmgr.tracked {
 		if !v {
