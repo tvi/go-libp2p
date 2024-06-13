@@ -18,10 +18,6 @@ type listener struct {
 	tag      protocol.ID
 	cancel   func()
 	streamCh chan network.Stream
-	// ignoreEOF is a flag that tells the listener to return conns that ignore EOF errors.
-	// Necessary because the default responsewriter will consider a connection closed if it reads EOF.
-	// But when on streams, it's fine for us to read EOF, but still be able to write.
-	ignoreEOF bool
 }
 
 // Accept returns the next a connection to this listener.
@@ -30,7 +26,7 @@ type listener struct {
 func (l *listener) Accept() (net.Conn, error) {
 	select {
 	case s := <-l.streamCh:
-		return newConn(s, l.ignoreEOF), nil
+		return newConn(s), nil
 	case <-l.ctx.Done():
 		return nil, l.ctx.Err()
 	}
@@ -52,7 +48,7 @@ func (l *listener) Addr() net.Addr {
 // Listen provides a standard net.Listener ready to accept "connections".
 // Under the hood, these connections are libp2p streams tagged with the
 // given protocol.ID.
-func Listen(h host.Host, tag protocol.ID, opts ...ListenerOption) (net.Listener, error) {
+func Listen(h host.Host, tag protocol.ID) (net.Listener, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	l := &listener{
@@ -61,11 +57,6 @@ func Listen(h host.Host, tag protocol.ID, opts ...ListenerOption) (net.Listener,
 		cancel:   cancel,
 		tag:      tag,
 		streamCh: make(chan network.Stream),
-	}
-	for _, opt := range opts {
-		if err := opt(l); err != nil {
-			return nil, err
-		}
 	}
 
 	h.SetStreamHandler(tag, func(s network.Stream) {
@@ -77,13 +68,4 @@ func Listen(h host.Host, tag protocol.ID, opts ...ListenerOption) (net.Listener,
 	})
 
 	return l, nil
-}
-
-type ListenerOption func(*listener) error
-
-func IgnoreEOF() ListenerOption {
-	return func(l *listener) error {
-		l.ignoreEOF = true
-		return nil
-	}
 }

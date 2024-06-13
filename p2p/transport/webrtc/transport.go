@@ -415,17 +415,15 @@ func genUfrag() string {
 		uFragAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
 		uFragPrefix   = "libp2p+webrtc+v1/"
 		uFragIdLength = 32
-		uFragLength   = len(uFragPrefix) + uFragIdLength
+		uFragIdOffset = len(uFragPrefix)
+		uFragLength   = uFragIdOffset + uFragIdLength
 	)
 
 	seed := [8]byte{}
 	rand.Read(seed[:])
 	r := mrand.New(mrand.NewSource(binary.BigEndian.Uint64(seed[:])))
 	b := make([]byte, uFragLength)
-	for i := 0; i < len(uFragPrefix); i++ {
-		b[i] = uFragPrefix[i]
-	}
-	for i := len(uFragPrefix); i < uFragLength; i++ {
+	for i := uFragIdOffset; i < uFragLength; i++ {
 		b[i] = uFragAlphabet[r.Intn(len(uFragAlphabet))]
 	}
 	return string(b)
