@@ -124,7 +124,7 @@ func (ac *client) GetReachability(ctx context.Context, p peer.ID, reqs []Request
 			return Result{}, fmt.Errorf("dial request failed: %w", ErrDialRefused)
 		}
 		return Result{}, fmt.Errorf("dial request failed: response status %d %s", resp.GetStatus(),
-			pb.DialStatus_name[int32(resp.GetStatus())])
+			pb.DialResponse_ResponseStatus_name[int32(resp.GetStatus())])
 	}
 	if resp.GetDialStatus() == pb.DialStatus_UNUSED {
 		return Result{}, fmt.Errorf("invalid response: invalid dial status UNUSED")
