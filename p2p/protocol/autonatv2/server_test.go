@@ -1,8 +1,10 @@
 package autonatv2
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -338,6 +340,46 @@ func TestRateLimiterStress(t *testing.T) {
 	}
 }
 
+func TestReadDialData(t *testing.T) {
+	for N := 30_000; N < 30_010; N++ {
+		for msgSize := 100; msgSize < 256; msgSize++ {
+			r, w := io.Pipe()
+			msg := &pb.Message{}
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := sendDialData(make([]byte, msgSize), N, w, msg)
+				if err != nil {
+					t.Error(err)
+				}
+				w.Close()
+			}()
+			err := readDialData(N, r)
+			require.NoError(t, err)
+			wg.Wait()
+		}
+
+		for msgSize := 1000; msgSize < 1256; msgSize++ {
+			r, w := io.Pipe()
+			msg := &pb.Message{}
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := sendDialData(make([]byte, msgSize), N, w, msg)
+				if err != nil {
+					t.Error(err)
+				}
+				w.Close()
+			}()
+			err := readDialData(N, r)
+			require.NoError(t, err)
+			wg.Wait()
+		}
+	}
+}
+
 func FuzzServerDialRequest(f *testing.F) {
 	a := newAutoNAT(f, nil, allowPrivateAddrs, WithServerRateLimit(math.MaxInt32, math.MaxInt32, math.MaxInt32))
 	c := newAutoNAT(f, nil)
@@ -364,4 +406,25 @@ func FuzzServerDialRequest(f *testing.F) {
 		s.Read(buf) // We only care that server didn't panic
 		s.Reset()
 	})
+}
+
+func FuzzReadDialData(f *testing.F) {
+	f.Fuzz(func(t *testing.T, numBytes int, data []byte) {
+		readDialData(numBytes, bytes.NewReader(data))
+	})
+}
+
+func BenchmarkDialData(b *testing.B) {
+	b.ReportAllocs()
+	const N = 100_000
+	streamBuffer := make([]byte, 2*N)
+	buf := bytes.NewBuffer(streamBuffer[:0])
+	dialData := make([]byte, 4000)
+	msg := &pb.Message{}
+	for i := 0; i < b.N; i++ {
+		err := sendDialData(dialData, N, buf, msg)
+		require.NoError(b, err)
+		err = readDialData(N, buf)
+		require.NoError(b, err)
+	}
 }

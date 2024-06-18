@@ -3,6 +3,7 @@ package autonatv2
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -176,7 +177,7 @@ func (as *server) handleDialRequest(s network.Stream) {
 	}
 
 	if isDialDataRequired {
-		if err := getDialData(w, r, &msg, addrIdx); err != nil {
+		if err := getDialData(w, s, &msg, addrIdx); err != nil {
 			s.Reset()
 			log.Debugf("%s refused dial data request: %s", p, err)
 			return
@@ -201,7 +202,7 @@ func (as *server) handleDialRequest(s network.Stream) {
 }
 
 // getDialData gets data from the client for dialing the address
-func getDialData(w pbio.Writer, r pbio.Reader, msg *pb.Message, addrIdx int) error {
+func getDialData(w pbio.Writer, s network.Stream, msg *pb.Message, addrIdx int) error {
 	numBytes := minHandshakeSizeBytes + rand.Intn(maxHandshakeSizeBytes-minHandshakeSizeBytes)
 	*msg = pb.Message{
 		Msg: &pb.Message_DialDataRequest{
@@ -214,17 +215,36 @@ func getDialData(w pbio.Writer, r pbio.Reader, msg *pb.Message, addrIdx int) err
 	if err := w.WriteMsg(msg); err != nil {
 		return fmt.Errorf("dial data write: %w", err)
 	}
+	// pbio.Reader that we used so far on this stream is buffered. But at this point
+	// there is nothing unread on the stream. So it is safe to use the raw stream to
+	// read, reducing allocations.
+	return readDialData(numBytes, s)
+}
+
+func readDialData(numBytes int, r io.Reader) error {
+	mr := &msgReader{R: r, Buf: make([]byte, maxMsgSize)}
 	for remain := numBytes; remain > 0; {
-		if err := r.ReadMsg(msg); err != nil {
+		msg, err := mr.ReadMsg()
+		if err != nil {
 			return fmt.Errorf("dial data read: %w", err)
 		}
-		if msg.GetDialDataResponse() == nil {
-			return fmt.Errorf("invalid msg type %T", msg.Msg)
+		// protobuf format is:
+		// (oneof dialDataResponse:<fieldTag><len varint>)(dial data:<fieldTag><len varint><bytes>)
+		bytesLen := len(msg)
+		bytesLen -= 2 // fieldTag + varint first byte
+		if bytesLen > 127 {
+			bytesLen -= 1 // varint second byte
 		}
-		remain -= len(msg.GetDialDataResponse().Data)
+		bytesLen -= 2 // second fieldTag + varint first byte
+		if bytesLen > 127 {
+			bytesLen -= 1 // varint second byte
+		}
+		if bytesLen > 0 {
+			remain -= bytesLen
+		}
 		// Check if the peer is not sending too little data forcing us to just do a lot of compute
-		if len(msg.GetDialDataResponse().Data) < 100 && remain > 0 {
-			return fmt.Errorf("dial data msg too small: %d", len(msg.GetDialDataResponse().Data))
+		if bytesLen < 100 && remain > 0 {
+			return fmt.Errorf("dial data msg too small: %d", bytesLen)
 		}
 	}
 	return nil

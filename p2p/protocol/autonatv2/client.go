@@ -3,6 +3,7 @@ package autonatv2
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -12,7 +13,9 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/protocol/autonatv2/pb"
 	"github.com/libp2p/go-msgio/pbio"
 	ma "github.com/multiformats/go-multiaddr"
+	"github.com/multiformats/go-varint"
 	"golang.org/x/exp/rand"
+	"google.golang.org/protobuf/proto"
 )
 
 //go:generate protoc --go_out=. --go_opt=Mpb/autonatv2.proto=./pb pb/autonatv2.proto
@@ -113,7 +116,7 @@ func (ac *client) GetReachability(ctx context.Context, p peer.ID, reqs []Request
 			return Result{}, fmt.Errorf("invalid dial data request: %w", err)
 		}
 		// dial data request is valid and we want to send data
-		if err := ac.sendDialData(msg.GetDialDataRequest(), w, &msg); err != nil {
+		if err := sendDialData(ac.dialData, int(msg.GetDialDataRequest().GetNumBytes()), s, &msg); err != nil {
 			s.Reset()
 			return Result{}, fmt.Errorf("dial data send failed: %w", err)
 		}
@@ -214,24 +217,32 @@ func (ac *client) newResult(resp *pb.DialResponse, reqs []Request, dialBackAddr 
 	}, nil
 }
 
-func (ac *client) sendDialData(req *pb.DialDataRequest, w pbio.Writer, msg *pb.Message) error {
-	nb := req.GetNumBytes()
-	ddResp := &pb.DialDataResponse{Data: ac.dialData}
+func sendDialData(dialData []byte, numBytes int, w io.Writer, msg *pb.Message) (err error) {
+	ddResp := &pb.DialDataResponse{Data: dialData}
 	*msg = pb.Message{
 		Msg: &pb.Message_DialDataResponse{
 			DialDataResponse: ddResp,
 		},
 	}
-	for remain := int(nb); remain > 0; {
-		end := remain
-		if end > len(ddResp.Data) {
-			end = len(ddResp.Data)
-		}
-		ddResp.Data = ddResp.Data[:end]
-		if err := w.WriteMsg(msg); err != nil {
+	// don't use pbio.Writer to avoid allocations
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	lenBuf := make([]byte, 5) // 5 bytes is enough for 4k
+	n := varint.PutUvarint(lenBuf, uint64(len(data)))
+	lenBuf = lenBuf[:n]
+
+	for remain := numBytes; remain > 0; {
+		_, err = w.Write(lenBuf)
+		if err != nil {
 			return err
 		}
-		remain -= end
+		_, err = w.Write(data)
+		if err != nil {
+			return err
+		}
+		remain -= len(dialData)
 	}
 	return nil
 }
