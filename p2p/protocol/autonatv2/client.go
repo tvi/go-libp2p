@@ -20,8 +20,9 @@ import (
 // client implements the client for making dial requests for AutoNAT v2. It verifies successful
 // dials and provides an option to send data for dial requests.
 type client struct {
-	host     host.Host
-	dialData []byte
+	host               host.Host
+	dialData           []byte
+	normalizeMultiaddr func(ma.Multiaddr) ma.Multiaddr
 
 	mu sync.Mutex
 	// dialBackQueues maps nonce to the channel for providing the local multiaddr of the connection
@@ -29,8 +30,21 @@ type client struct {
 	dialBackQueues map[uint64]chan ma.Multiaddr
 }
 
+type normalizeMultiaddrer interface {
+	NormalizeMultiaddr(ma.Multiaddr) ma.Multiaddr
+}
+
 func newClient(h host.Host) *client {
-	return &client{host: h, dialData: make([]byte, 4000), dialBackQueues: make(map[uint64]chan ma.Multiaddr)}
+	normalizeMultiaddr := func(a ma.Multiaddr) ma.Multiaddr { return a }
+	if hn, ok := h.(normalizeMultiaddrer); ok {
+		normalizeMultiaddr = hn.NormalizeMultiaddr
+	}
+	return &client{
+		host:               h,
+		dialData:           make([]byte, 4000),
+		normalizeMultiaddr: normalizeMultiaddr,
+		dialBackQueues:     make(map[uint64]chan ma.Multiaddr),
+	}
 }
 
 func (ac *client) Start() {
@@ -169,7 +183,7 @@ func (ac *client) newResult(resp *pb.DialResponse, reqs []Request, dialBackAddr 
 	var rch network.Reachability
 	switch resp.DialStatus {
 	case pb.DialStatus_OK:
-		if !areAddrsConsistent(dialBackAddr, addr) {
+		if !ac.areAddrsConsistent(dialBackAddr, addr) {
 			// the server is misinforming us about the address it successfully dialed
 			// either we received no dialback or the address on the dialback is inconsistent with
 			// what the server is telling us
@@ -179,7 +193,7 @@ func (ac *client) newResult(resp *pb.DialResponse, reqs []Request, dialBackAddr 
 	case pb.DialStatus_E_DIAL_ERROR:
 		rch = network.ReachabilityPrivate
 	case pb.DialStatus_E_DIAL_BACK_ERROR:
-		if areAddrsConsistent(dialBackAddr, addr) {
+		if ac.areAddrsConsistent(dialBackAddr, addr) {
 			// We received the dial back but the server claims the dial back errored.
 			// As long as we received the correct nonce in dial back it is safe to assume
 			// that we are public.
@@ -287,10 +301,12 @@ func (ac *client) handleDialBack(s network.Stream) {
 	}
 }
 
-func areAddrsConsistent(connLocalAddr, dialedAddr ma.Multiaddr) bool {
+func (ac *client) areAddrsConsistent(connLocalAddr, dialedAddr ma.Multiaddr) bool {
 	if connLocalAddr == nil || dialedAddr == nil {
 		return false
 	}
+	connLocalAddr = ac.normalizeMultiaddr(connLocalAddr)
+	dialedAddr = ac.normalizeMultiaddr(dialedAddr)
 
 	localProtos := connLocalAddr.Protocols()
 	externalProtos := dialedAddr.Protocols()

@@ -592,6 +592,17 @@ func TestPeersMap(t *testing.T) {
 }
 
 func TestAreAddrsConsistency(t *testing.T) {
+	c := &client{
+		normalizeMultiaddr: func(a ma.Multiaddr) ma.Multiaddr {
+			for {
+				rest, l := ma.SplitLast(a)
+				if _, err := l.ValueForProtocol(ma.P_CERTHASH); err != nil {
+					return a
+				}
+				a = rest
+			}
+		},
+	}
 	tests := []struct {
 		name      string
 		localAddr ma.Multiaddr
@@ -623,6 +634,12 @@ func TestAreAddrsConsistency(t *testing.T) {
 			success:   false,
 		},
 		{
+			name:      "webtransport-certhash",
+			localAddr: ma.StringCast("/ip4/192.168.0.1/udp/12345/quic-v1/webtransport"),
+			dialAddr:  ma.StringCast("/ip4/1.2.3.4/udp/123/quic-v1/webtransport/certhash/uEgNmb28"),
+			success:   true,
+		},
+		{
 			name:      "dns",
 			localAddr: ma.StringCast("/dns/lib.p2p/udp/12345/quic-v1"),
 			dialAddr:  ma.StringCast("/ip6/1::1/udp/123/quic-v1/"),
@@ -631,7 +648,7 @@ func TestAreAddrsConsistency(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if areAddrsConsistent(tc.localAddr, tc.dialAddr) != tc.success {
+			if c.areAddrsConsistent(tc.localAddr, tc.dialAddr) != tc.success {
 				wantStr := "match"
 				if !tc.success {
 					wantStr = "mismatch"
