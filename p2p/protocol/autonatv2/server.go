@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -222,7 +223,8 @@ func getDialData(w pbio.Writer, s network.Stream, msg *pb.Message, addrIdx int) 
 }
 
 func readDialData(numBytes int, r io.Reader) error {
-	mr := &msgReader{R: r, Buf: make([]byte, maxMsgSize)}
+	mr := &msgReader{R: r, Buf: pool.Get(maxMsgSize)}
+	defer pool.Put(mr.Buf)
 	for remain := numBytes; remain > 0; {
 		msg, err := mr.ReadMsg()
 		if err != nil {

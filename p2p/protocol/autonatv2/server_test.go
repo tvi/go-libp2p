@@ -18,6 +18,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 	"github.com/libp2p/go-libp2p/p2p/protocol/autonatv2/pb"
+	"github.com/libp2p/go-msgio/pbio"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/multiformats/go-varint"
 	"github.com/stretchr/testify/require"
@@ -349,11 +350,12 @@ func TestReadDialData(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				err := sendDialData(make([]byte, msgSize), N, w, msg)
+				mw := pbio.NewDelimitedWriter(w)
+				err := sendDialData(make([]byte, msgSize), N, mw, msg)
 				if err != nil {
 					t.Error(err)
 				}
-				w.Close()
+				mw.Close()
 			}()
 			err := readDialData(N, r)
 			require.NoError(t, err)
@@ -367,11 +369,12 @@ func TestReadDialData(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				err := sendDialData(make([]byte, msgSize), N, w, msg)
+				mw := pbio.NewDelimitedWriter(w)
+				err := sendDialData(make([]byte, msgSize), N, mw, msg)
 				if err != nil {
 					t.Error(err)
 				}
-				w.Close()
+				mw.Close()
 			}()
 			err := readDialData(N, r)
 			require.NoError(t, err)
@@ -421,10 +424,12 @@ func BenchmarkDialData(b *testing.B) {
 	buf := bytes.NewBuffer(streamBuffer[:0])
 	dialData := make([]byte, 4000)
 	msg := &pb.Message{}
+	w := pbio.NewDelimitedWriter(buf)
+	err := sendDialData(dialData, N, w, msg)
+	require.NoError(b, err)
+	dialDataBuf := buf.Bytes()
 	for i := 0; i < b.N; i++ {
-		err := sendDialData(dialData, N, buf, msg)
-		require.NoError(b, err)
-		err = readDialData(N, buf)
+		err = readDialData(N, bytes.NewReader(dialDataBuf))
 		require.NoError(b, err)
 	}
 }
