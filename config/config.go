@@ -227,6 +227,7 @@ func (cfg *Config) makeAutoNATV2Host() (host.Host, error) {
 		DialRanker:                  swarm.NoDelayDialRanker,
 		UDPBlackHoleSuccessCounter:  cfg.UDPBlackHoleSuccessCounter,
 		IPv6BlackHoleSuccessCounter: cfg.IPv6BlackHoleSuccessCounter,
+		ResourceManager:             cfg.ResourceManager,
 		SwarmOpts: []swarm.Option{
 			// Don't update black hole state for failed autonat dials
 			swarm.WithReadOnlyBlackHoleDetector(),
