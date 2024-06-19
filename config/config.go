@@ -487,6 +487,7 @@ func (cfg *Config) addAutoNAT(h *bhost.BasicHost) error {
 			PeerKey:            autonatPrivKey,
 			Peerstore:          ps,
 			DialRanker:         swarm.NoDelayDialRanker,
+			ResourceManager:    cfg.ResourceManager,
 			SwarmOpts: []swarm.Option{
 				// It is better to disable black hole detection and just attempt a dial for autonat
 				swarm.WithUDPBlackHoleConfig(false, 0, 0),
