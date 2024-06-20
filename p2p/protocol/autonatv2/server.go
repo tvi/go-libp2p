@@ -15,9 +15,10 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/protocol/autonatv2/pb"
 	"github.com/libp2p/go-msgio/pbio"
 
+	"math/rand"
+
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
-	"golang.org/x/exp/rand"
 )
 
 type dataRequestPolicyFunc = func(s network.Stream, dialAddr ma.Multiaddr) bool
@@ -32,7 +33,8 @@ type server struct {
 
 	// dialDataRequestPolicy is used to determine whether dialing the address requires receiving
 	// dial data. It is set to amplification attack prevention by default.
-	dialDataRequestPolicy dataRequestPolicyFunc
+	dialDataRequestPolicy                dataRequestPolicyFunc
+	amplificatonAttackPreventionDialWait time.Duration
 
 	// for tests
 	now               func() time.Time
@@ -41,10 +43,11 @@ type server struct {
 
 func newServer(host, dialer host.Host, s *autoNATSettings) *server {
 	return &server{
-		dialerHost:            dialer,
-		host:                  host,
-		dialDataRequestPolicy: s.dataRequestPolicy,
-		allowPrivateAddrs:     s.allowPrivateAddrs,
+		dialerHost:                           dialer,
+		host:                                 host,
+		dialDataRequestPolicy:                s.dataRequestPolicy,
+		amplificatonAttackPreventionDialWait: s.amplificatonAttackPreventionDialWait,
+		allowPrivateAddrs:                    s.allowPrivateAddrs,
 		limiter: &rateLimiter{
 			RPM:         s.serverRPM,
 			PerPeerRPM:  s.serverPerPeerRPM,
@@ -81,6 +84,9 @@ func (as *server) handleDialRequest(s network.Stream) {
 	}
 	defer s.Scope().ReleaseMemory(maxMsgSize)
 
+	deadline := as.now().Add(streamTimeout)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
 	s.SetDeadline(as.now().Add(streamTimeout))
 	defer s.Close()
 
@@ -183,9 +189,20 @@ func (as *server) handleDialRequest(s network.Stream) {
 			log.Debugf("%s refused dial data request: %s", p, err)
 			return
 		}
+		// wait for a bit to prevent thundering herd style attacks on a victim
+		waitTime := time.Duration(rand.Intn(int(as.amplificatonAttackPreventionDialWait) + 1)) // the range is [0, n)
+		t := time.NewTimer(waitTime)
+		defer t.Stop()
+		select {
+		case <-ctx.Done():
+			s.Reset()
+			log.Debugf("rejecting request without dialing: %s %p ", p, ctx.Err())
+			return
+		case <-t.C:
+		}
 	}
 
-	dialStatus := as.dialBack(s.Conn().RemotePeer(), dialAddr, nonce)
+	dialStatus := as.dialBack(ctx, s.Conn().RemotePeer(), dialAddr, nonce)
 	msg = pb.Message{
 		Msg: &pb.Message_DialResponse{
 			DialResponse: &pb.DialResponse{
@@ -252,8 +269,8 @@ func readDialData(numBytes int, r io.Reader) error {
 	return nil
 }
 
-func (as *server) dialBack(p peer.ID, addr ma.Multiaddr, nonce uint64) pb.DialStatus {
-	ctx, cancel := context.WithTimeout(context.Background(), dialBackDialTimeout)
+func (as *server) dialBack(ctx context.Context, p peer.ID, addr ma.Multiaddr, nonce uint64) pb.DialStatus {
+	ctx, cancel := context.WithTimeout(ctx, dialBackDialTimeout)
 	ctx = network.WithForceDirectDial(ctx, "autonatv2")
 	as.dialerHost.Peerstore().AddAddr(p, addr, peerstore.TempAddrTTL)
 	defer func() {

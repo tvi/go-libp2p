@@ -33,7 +33,7 @@ func newTestRequests(addrs []ma.Multiaddr, sendDialData bool) (reqs []Request) {
 }
 
 func TestServerInvalidAddrsRejected(t *testing.T) {
-	c := newAutoNAT(t, nil, allowPrivateAddrs)
+	c := newAutoNAT(t, nil, allowPrivateAddrs, withAmplificationAttackPreventionDialWait(0))
 	defer c.Close()
 	defer c.host.Close()
 
@@ -46,7 +46,6 @@ func TestServerInvalidAddrsRejected(t *testing.T) {
 		idAndWait(t, c, an)
 
 		res, err := c.GetReachability(context.Background(), newTestRequests(c.host.Addrs(), true))
-		fmt.Println(res, err)
 		require.ErrorIs(t, err, ErrDialRefused)
 		require.Equal(t, Result{}, res)
 	})
@@ -151,6 +150,7 @@ func TestServerDataRequest(t *testing.T) {
 			return false
 		}),
 		WithServerRateLimit(10, 10, 10),
+		withAmplificationAttackPreventionDialWait(0),
 	)
 	defer an.Close()
 	defer an.host.Close()
@@ -186,6 +186,55 @@ func TestServerDataRequest(t *testing.T) {
 	c.cli.dialData = c.cli.dialData[:10]
 	_, err = c.GetReachability(context.Background(), []Request{{Addr: quicAddr, SendDialData: true}, {Addr: tcpAddr}})
 	require.Error(t, err)
+}
+func TestServerDataRequestJitter(t *testing.T) {
+	// server will skip all tcp addresses
+	dialer := bhost.NewBlankHost(swarmt.GenSwarm(t, swarmt.OptDisableTCP))
+	// ask for dial data for quic address
+	an := newAutoNAT(t, dialer, allowPrivateAddrs, withDataRequestPolicy(
+		func(s network.Stream, dialAddr ma.Multiaddr) bool {
+			if _, err := dialAddr.ValueForProtocol(ma.P_QUIC_V1); err == nil {
+				return true
+			}
+			return false
+		}),
+		WithServerRateLimit(10, 10, 10),
+		withAmplificationAttackPreventionDialWait(5*time.Second),
+	)
+	defer an.Close()
+	defer an.host.Close()
+
+	c := newAutoNAT(t, nil, allowPrivateAddrs)
+	defer c.Close()
+	defer c.host.Close()
+
+	idAndWait(t, c, an)
+
+	var quicAddr, tcpAddr ma.Multiaddr
+	for _, a := range c.host.Addrs() {
+		if _, err := a.ValueForProtocol(ma.P_QUIC_V1); err == nil {
+			quicAddr = a
+		} else if _, err := a.ValueForProtocol(ma.P_TCP); err == nil {
+			tcpAddr = a
+		}
+	}
+
+	for i := 0; i < 10; i++ {
+		st := time.Now()
+		res, err := c.GetReachability(context.Background(), []Request{{Addr: quicAddr, SendDialData: true}, {Addr: tcpAddr}})
+		took := time.Since(st)
+		require.NoError(t, err)
+
+		require.Equal(t, Result{
+			Addr:         quicAddr,
+			Reachability: network.ReachabilityPublic,
+			Status:       pb.DialStatus_OK,
+		}, res)
+		if took > 500*time.Millisecond {
+			return
+		}
+	}
+	t.Fatalf("expected server to delay at least 1 dial")
 }
 
 func TestServerDial(t *testing.T) {

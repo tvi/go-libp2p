@@ -4,23 +4,24 @@ import "time"
 
 // autoNATSettings is used to configure AutoNAT
 type autoNATSettings struct {
-	allowPrivateAddrs bool
-	serverRPM         int
-	serverPerPeerRPM  int
-	serverDialDataRPM int
-	dataRequestPolicy dataRequestPolicyFunc
-	now               func() time.Time
+	allowPrivateAddrs                    bool
+	serverRPM                            int
+	serverPerPeerRPM                     int
+	serverDialDataRPM                    int
+	dataRequestPolicy                    dataRequestPolicyFunc
+	now                                  func() time.Time
+	amplificatonAttackPreventionDialWait time.Duration
 }
 
 func defaultSettings() *autoNATSettings {
 	return &autoNATSettings{
-		allowPrivateAddrs: false,
-		// TODO: confirm rate limiting defaults
-		serverRPM:         20,
-		serverPerPeerRPM:  2,
-		serverDialDataRPM: 5,
-		dataRequestPolicy: amplificationAttackPrevention,
-		now:               time.Now,
+		allowPrivateAddrs:                    false,
+		serverRPM:                            60, // 1 every second
+		serverPerPeerRPM:                     12, // 1 every 5 seconds
+		serverDialDataRPM:                    12, // 1 every 5 seconds
+		dataRequestPolicy:                    amplificationAttackPrevention,
+		amplificatonAttackPreventionDialWait: 3 * time.Second,
+		now:                                  time.Now,
 	}
 }
 
@@ -45,4 +46,11 @@ func withDataRequestPolicy(drp dataRequestPolicyFunc) AutoNATOption {
 func allowPrivateAddrs(s *autoNATSettings) error {
 	s.allowPrivateAddrs = true
 	return nil
+}
+
+func withAmplificationAttackPreventionDialWait(d time.Duration) AutoNATOption {
+	return func(s *autoNATSettings) error {
+		s.amplificatonAttackPreventionDialWait = d
+		return nil
+	}
 }
