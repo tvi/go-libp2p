@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
@@ -22,12 +23,15 @@ import (
 )
 
 func main() {
-	var port int
 	var reuseKey bool
-	flag.IntVar(&port, "port", 5123, "")
+	var serverName string
 	flag.BoolVar(&reuseKey, "reuse-key", false, "")
+	flag.StringVar(&serverName, "server-name", "", "")
 	flag.Parse()
-
+	if serverName == "" {
+		panic("need servername")
+	}
+	serverName = strings.Trim(serverName, "\n\t ")
 	pk, _, err := crypto.GenerateEd25519Key(rand.Reader)
 	if err != nil {
 		panic(err)
@@ -35,6 +39,8 @@ func main() {
 	if reuseKey {
 		pk = PrivKey(pk)
 	}
+
+	port := 5123
 	listenAddrStrings := []string{
 		fmt.Sprintf("/ip4/0.0.0.0/udp/%d/quic-v1", port),
 		fmt.Sprintf("/ip4/0.0.0.0/udp/%d/webrtc-direct", port+1),
@@ -89,8 +95,8 @@ func main() {
 		libp2p.ResourceManager(r),
 		libp2p.AddrsFactory(func(addrs []ma.Multiaddr) []ma.Multiaddr {
 			return []ma.Multiaddr{
-				ma.StringCast("/dns/dht.nonsequitur.xyz/udp/5123/quic-v1"),
-				ma.StringCast("/dns/dht.nonsequitur.xyz/udp/5124/webrtc-direct"),
+				ma.StringCast(fmt.Sprintf("/dns/%s/udp/5123/quic-v1", serverName)),
+				ma.StringCast(fmt.Sprintf("/dns/%s/udp/5124/webrtc-direct", serverName)),
 			}
 		}),
 		libp2p.DisableIdentifyAddressDiscovery(),
