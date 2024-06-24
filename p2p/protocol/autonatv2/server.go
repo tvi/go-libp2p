@@ -2,6 +2,7 @@ package autonatv2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -19,6 +20,12 @@ import (
 
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
+)
+
+var (
+	errResourceLimitExceeded = errors.New("resource limit exceeded")
+	errBadRequest            = errors.New("bad request")
+	errDialDataRefused       = errors.New("dial data refused")
 )
 
 type dataRequestPolicyFunc = func(s network.Stream, dialAddr ma.Multiaddr) bool
@@ -71,16 +78,23 @@ func (as *server) Close() {
 
 // handleDialRequest is the dial-request protocol stream handler
 func (as *server) handleDialRequest(s network.Stream) {
+	respStatus, dialStatus, err := as.serveDialRequest(s)
+	log.Debugf("completed dial-request from %s, response status: %s, dial status: %s, err: %s",
+		s.Conn().RemotePeer(), &respStatus, &dialStatus, err)
+	
+}
+
+func (as *server) serveDialRequest(s network.Stream) (pb.DialResponse_ResponseStatus, pb.DialStatus, error) {
 	if err := s.Scope().SetService(ServiceName); err != nil {
 		s.Reset()
-		log.Debugf("failed to attach stream to service %s: %w", ServiceName, err)
-		return
+		log.Debugf("failed to attach stream to %s service: %w", ServiceName, err)
+		return 0, 0, errors.New("failed to attach stream to autonat-v2")
 	}
 
 	if err := s.Scope().ReserveMemory(maxMsgSize, network.ReservationPriorityAlways); err != nil {
 		s.Reset()
 		log.Debugf("failed to reserve memory for stream %s: %w", DialProtocol, err)
-		return
+		return 0, 0, errResourceLimitExceeded
 	}
 	defer s.Scope().ReleaseMemory(maxMsgSize)
 
@@ -106,10 +120,10 @@ func (as *server) handleDialRequest(s network.Stream) {
 		if err := w.WriteMsg(&msg); err != nil {
 			s.Reset()
 			log.Debugf("failed to write request rejected response to %s: %s", p, err)
-			return
+			return pb.DialResponse_E_REQUEST_REJECTED, 0, fmt.Errorf("write failed: %w", err)
 		}
 		log.Debugf("rejected request from %s: rate limit exceeded", p)
-		return
+		return pb.DialResponse_E_REQUEST_REJECTED, 0, nil
 	}
 	defer as.limiter.CompleteRequest(p)
 
@@ -117,12 +131,12 @@ func (as *server) handleDialRequest(s network.Stream) {
 	if err := r.ReadMsg(&msg); err != nil {
 		s.Reset()
 		log.Debugf("failed to read request from %s: %s", p, err)
-		return
+		return 0, 0, fmt.Errorf("read failed: %w", err)
 	}
 	if msg.GetDialRequest() == nil {
 		s.Reset()
 		log.Debugf("invalid message type from %s: %T expected: DialRequest", p, msg.Msg)
-		return
+		return 0, 0, errBadRequest
 	}
 
 	// parse peer's addresses
@@ -158,9 +172,9 @@ func (as *server) handleDialRequest(s network.Stream) {
 		if err := w.WriteMsg(&msg); err != nil {
 			s.Reset()
 			log.Debugf("failed to write dial refused response to %s: %s", p, err)
-			return
+			return pb.DialResponse_E_DIAL_REFUSED, 0, fmt.Errorf("write failed: %w", err)
 		}
-		return
+		return pb.DialResponse_E_DIAL_REFUSED, 0, nil
 	}
 
 	nonce := msg.GetDialRequest().Nonce
@@ -177,17 +191,17 @@ func (as *server) handleDialRequest(s network.Stream) {
 		if err := w.WriteMsg(&msg); err != nil {
 			s.Reset()
 			log.Debugf("failed to write request rejected response to %s: %s", p, err)
-			return
+			return pb.DialResponse_E_REQUEST_REJECTED, 0, fmt.Errorf("write failed: %w", err)
 		}
 		log.Debugf("rejected request from %s: rate limit exceeded", p)
-		return
+		return pb.DialResponse_E_REQUEST_REJECTED, 0, nil
 	}
 
 	if isDialDataRequired {
 		if err := getDialData(w, s, &msg, addrIdx); err != nil {
 			s.Reset()
 			log.Debugf("%s refused dial data request: %s", p, err)
-			return
+			return 0, 0, errDialDataRefused
 		}
 		// wait for a bit to prevent thundering herd style attacks on a victim
 		waitTime := time.Duration(rand.Intn(int(as.amplificatonAttackPreventionDialWait) + 1)) // the range is [0, n)
@@ -197,7 +211,7 @@ func (as *server) handleDialRequest(s network.Stream) {
 		case <-ctx.Done():
 			s.Reset()
 			log.Debugf("rejecting request without dialing: %s %p ", p, ctx.Err())
-			return
+			return 0, 0, ctx.Err()
 		case <-t.C:
 		}
 	}
@@ -215,8 +229,9 @@ func (as *server) handleDialRequest(s network.Stream) {
 	if err := w.WriteMsg(&msg); err != nil {
 		s.Reset()
 		log.Debugf("failed to write response to %s: %s", p, err)
-		return
+		return pb.DialResponse_OK, dialStatus, fmt.Errorf("write failed: %w", err)
 	}
+	return pb.DialResponse_OK, dialStatus, nil
 }
 
 // getDialData gets data from the client for dialing the address
