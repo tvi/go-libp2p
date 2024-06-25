@@ -772,27 +772,26 @@ func TestHTTPHostAsRoundTripper(t *testing.T) {
 		w.Write([]byte("hello"))
 	}))
 
-	// Uncomment when we get the http-path changes in go-multiaddr
-	// // Different protocol.ID and mounted at a different path
-	// serverHttpHost.SetHTTPHandlerAtPath("/hello-again", "/hello", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	// 	w.Write([]byte("hello"))
-	// }))
+	// Different protocol.ID and mounted at a different path
+	serverHttpHost.SetHTTPHandlerAtPath("/hello-again", "/hello", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hello"))
+	}))
 
 	go serverHttpHost.Serve()
 	defer serverHttpHost.Close()
 
-	testCases := []string{
-		// Version that has an http-path. Will uncomment when we get the http-path changes in go-multiaddr
-		// "multiaddr:" + serverHost.Addrs()[0].String() + "/http-path/hello",
-	}
+	httpPathSuffix := "/http-path/hello2"
+	var testCases []string
 	for _, a := range serverHttpHost.Addrs() {
 		if _, err := a.ValueForProtocol(ma.P_HTTP); err == nil {
 			testCases = append(testCases, "multiaddr:"+a.String())
+			testCases = append(testCases, "multiaddr:"+a.String()+httpPathSuffix)
 			serverPort, err := a.ValueForProtocol(ma.P_TCP)
 			require.NoError(t, err)
 			testCases = append(testCases, "http://127.0.0.1:"+serverPort)
 		} else {
 			testCases = append(testCases, "multiaddr:"+a.String()+"/p2p/"+serverHost.ID().String())
+			testCases = append(testCases, "multiaddr:"+a.String()+"/p2p/"+serverHost.ID().String()+httpPathSuffix)
 		}
 	}
 

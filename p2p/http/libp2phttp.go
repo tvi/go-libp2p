@@ -227,7 +227,10 @@ var ErrNoListeners = errors.New("nothing to listen on")
 
 func (h *Host) setupListeners(listenerErrCh chan error) error {
 	for _, addr := range h.ListenAddrs {
-		parsedAddr := parseMultiaddr(addr)
+		parsedAddr, err := parseMultiaddr(addr)
+		if err != nil {
+			return err
+		}
 		// resolve the host
 		ipaddr, err := net.ResolveIPAddr("ip", parsedAddr.host)
 		if err != nil {
@@ -657,12 +660,22 @@ func (h *Host) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	addr, isHTTP := normalizeHTTPMultiaddr(addr)
+	parsed, err := parseMultiaddr(addr)
+	if err != nil {
+		return nil, err
+	}
+	scheme := "http"
+	if parsed.useHTTPS {
+		scheme = "https"
+	}
+	u := url.URL{
+		Scheme:  scheme,
+		Host:    parsed.host + ":" + parsed.port,
+		Path:    parsed.httpPath,
+		RawPath: parsed.httpPath,
+	}
+	r.URL = &u
 	if isHTTP {
-		parsed := parseMultiaddr(addr)
-		scheme := "http"
-		if parsed.useHTTPS {
-			scheme = "https"
-		}
 		h.initDefaultRT()
 		rt := h.DefaultClientRoundTripper
 		if parsed.sni != parsed.host {
@@ -676,13 +689,6 @@ func (h *Host) RoundTrip(r *http.Request) (*http.Response, error) {
 			rt.TLSClientConfig.ServerName = parsed.sni
 		}
 
-		// TODO add http-path support
-		url := url.URL{
-			Scheme: scheme,
-			Host:   parsed.host + ":" + parsed.port,
-		}
-
-		r.URL = &url
 		return rt.RoundTrip(r)
 	}
 
@@ -690,14 +696,16 @@ func (h *Host) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("can not do HTTP over streams. Missing StreamHost")
 	}
 
-	addr, pid := peer.SplitAddr(addr)
-	if pid == "" {
+	if parsed.peer == "" {
 		return nil, fmt.Errorf("no peer ID in multiaddr")
 	}
-	h.StreamHost.Peerstore().AddAddrs(pid, []ma.Multiaddr{addr}, peerstore.TempAddrTTL)
+	addr, _ = ma.SplitFunc(addr, func(c ma.Component) bool {
+		return c.Protocol().Code == ma.P_P2P
+	})
+	h.StreamHost.Peerstore().AddAddrs(parsed.peer, []ma.Multiaddr{addr}, peerstore.TempAddrTTL)
 
 	srt := streamRoundTripper{
-		server:       pid,
+		server:       parsed.peer,
 		skipAddAddrs: true,
 		httpHost:     h,
 		h:            h.StreamHost,
@@ -750,7 +758,10 @@ func (h *Host) NewConstrainedRoundTripper(server peer.AddrInfo, opts ...RoundTri
 
 	// Currently the HTTP transport can not authenticate peer IDs.
 	if !options.serverMustAuthenticatePeerID && len(httpAddrs) > 0 && (options.preferHTTPTransport || (firstAddrIsHTTP && !existingStreamConn)) {
-		parsed := parseMultiaddr(httpAddrs[0])
+		parsed, err := parseMultiaddr(httpAddrs[0])
+		if err != nil {
+			return nil, err
+		}
 		scheme := "http"
 		if parsed.useHTTPS {
 			scheme = "https"
@@ -791,15 +802,18 @@ func (h *Host) NewConstrainedRoundTripper(server peer.AddrInfo, opts ...RoundTri
 	return &streamRoundTripper{h: h.StreamHost, server: server.ID, serverAddrs: nonHTTPAddrs, httpHost: h}, nil
 }
 
-type httpMultiaddr struct {
+type explodedMultiaddr struct {
 	useHTTPS bool
 	host     string
 	port     string
 	sni      string
+	httpPath string
+	peer     peer.ID
 }
 
-func parseMultiaddr(addr ma.Multiaddr) httpMultiaddr {
-	out := httpMultiaddr{}
+func parseMultiaddr(addr ma.Multiaddr) (explodedMultiaddr, error) {
+	out := explodedMultiaddr{}
+	var err error
 	ma.ForEach(addr, func(c ma.Component) bool {
 		switch c.Protocol().Code {
 		case ma.P_IP4, ma.P_IP6, ma.P_DNS, ma.P_DNS4, ma.P_DNS6:
@@ -810,15 +824,26 @@ func parseMultiaddr(addr ma.Multiaddr) httpMultiaddr {
 			out.useHTTPS = true
 		case ma.P_SNI:
 			out.sni = c.Value()
-
+		case ma.P_HTTP_PATH:
+			out.httpPath, err = url.QueryUnescape(c.Value())
+			if err == nil && out.httpPath[0] != '/' {
+				out.httpPath = "/" + out.httpPath
+			}
+		case ma.P_P2P:
+			out.peer, err = peer.Decode(c.Value())
 		}
-		return out.host == "" || out.port == "" || !out.useHTTPS || out.sni == ""
+
+		if err != nil {
+			return false
+		}
+
+		return out.host == "" || out.port == "" || !out.useHTTPS || out.sni == "" || out.httpPath == "" || out.peer == ""
 	})
 
 	if out.useHTTPS && out.sni == "" {
 		out.sni = out.host
 	}
-	return out
+	return out, err
 }
 
 var httpComponent, _ = ma.NewComponent("http", "")
@@ -918,7 +943,7 @@ func (h *Host) getAndStorePeerMetadata(ctx context.Context, roundtripper http.Ro
 }
 
 func requestPeerMeta(ctx context.Context, roundtripper http.RoundTripper, wellKnownResource string) (PeerMeta, error) {
-	req, err := http.NewRequest("GET", wellKnownResource, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", wellKnownResource, nil)
 	if err != nil {
 		return nil, err
 	}
