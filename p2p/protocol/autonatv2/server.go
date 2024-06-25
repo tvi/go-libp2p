@@ -30,6 +30,14 @@ var (
 
 type dataRequestPolicyFunc = func(s network.Stream, dialAddr ma.Multiaddr) bool
 
+type EventDialRequestCompleted struct {
+	Error            error
+	ResponseStatus   pb.DialResponse_ResponseStatus
+	DialStatus       pb.DialStatus
+	DialDataRequired bool
+	DialedAddr       ma.Multiaddr
+}
+
 // server implements the AutoNATv2 server.
 // It can ask client to provide dial data before attempting the requested dial.
 // It rate limits requests on a global level, per peer level and on whether the request requires dial data.
@@ -42,6 +50,7 @@ type server struct {
 	// dial data. It is set to amplification attack prevention by default.
 	dialDataRequestPolicy                dataRequestPolicyFunc
 	amplificatonAttackPreventionDialWait time.Duration
+	metricsTracer                        MetricsTracer
 
 	// for tests
 	now               func() time.Time
@@ -61,7 +70,8 @@ func newServer(host, dialer host.Host, s *autoNATSettings) *server {
 			DialDataRPM: s.serverDialDataRPM,
 			now:         s.now,
 		},
-		now: s.now,
+		now:           s.now,
+		metricsTracer: s.metricsTracer,
 	}
 }
 
@@ -78,23 +88,27 @@ func (as *server) Close() {
 
 // handleDialRequest is the dial-request protocol stream handler
 func (as *server) handleDialRequest(s network.Stream) {
-	respStatus, dialStatus, err := as.serveDialRequest(s)
+	evt := as.serveDialRequest(s)
 	log.Debugf("completed dial-request from %s, response status: %s, dial status: %s, err: %s",
-		s.Conn().RemotePeer(), &respStatus, &dialStatus, err)
-	
+		s.Conn().RemotePeer(), evt.ResponseStatus, evt.DialStatus, evt.Error)
+	if as.metricsTracer != nil {
+		as.metricsTracer.CompletedRequest(evt)
+	}
 }
 
-func (as *server) serveDialRequest(s network.Stream) (pb.DialResponse_ResponseStatus, pb.DialStatus, error) {
+func (as *server) serveDialRequest(s network.Stream) EventDialRequestCompleted {
 	if err := s.Scope().SetService(ServiceName); err != nil {
 		s.Reset()
 		log.Debugf("failed to attach stream to %s service: %w", ServiceName, err)
-		return 0, 0, errors.New("failed to attach stream to autonat-v2")
+		return EventDialRequestCompleted{
+			Error: errors.New("failed to attach stream to autonat-v2"),
+		}
 	}
 
 	if err := s.Scope().ReserveMemory(maxMsgSize, network.ReservationPriorityAlways); err != nil {
 		s.Reset()
 		log.Debugf("failed to reserve memory for stream %s: %w", DialProtocol, err)
-		return 0, 0, errResourceLimitExceeded
+		return EventDialRequestCompleted{Error: errResourceLimitExceeded}
 	}
 	defer s.Scope().ReleaseMemory(maxMsgSize)
 
@@ -120,10 +134,13 @@ func (as *server) serveDialRequest(s network.Stream) (pb.DialResponse_ResponseSt
 		if err := w.WriteMsg(&msg); err != nil {
 			s.Reset()
 			log.Debugf("failed to write request rejected response to %s: %s", p, err)
-			return pb.DialResponse_E_REQUEST_REJECTED, 0, fmt.Errorf("write failed: %w", err)
+			return EventDialRequestCompleted{
+				ResponseStatus: pb.DialResponse_E_REQUEST_REJECTED,
+				Error:          fmt.Errorf("write failed: %w", err),
+			}
 		}
 		log.Debugf("rejected request from %s: rate limit exceeded", p)
-		return pb.DialResponse_E_REQUEST_REJECTED, 0, nil
+		return EventDialRequestCompleted{ResponseStatus: pb.DialResponse_E_REQUEST_REJECTED}
 	}
 	defer as.limiter.CompleteRequest(p)
 
@@ -131,12 +148,12 @@ func (as *server) serveDialRequest(s network.Stream) (pb.DialResponse_ResponseSt
 	if err := r.ReadMsg(&msg); err != nil {
 		s.Reset()
 		log.Debugf("failed to read request from %s: %s", p, err)
-		return 0, 0, fmt.Errorf("read failed: %w", err)
+		return EventDialRequestCompleted{Error: fmt.Errorf("read failed: %w", err)}
 	}
 	if msg.GetDialRequest() == nil {
 		s.Reset()
 		log.Debugf("invalid message type from %s: %T expected: DialRequest", p, msg.Msg)
-		return 0, 0, errBadRequest
+		return EventDialRequestCompleted{Error: errBadRequest}
 	}
 
 	// parse peer's addresses
@@ -172,9 +189,14 @@ func (as *server) serveDialRequest(s network.Stream) (pb.DialResponse_ResponseSt
 		if err := w.WriteMsg(&msg); err != nil {
 			s.Reset()
 			log.Debugf("failed to write dial refused response to %s: %s", p, err)
-			return pb.DialResponse_E_DIAL_REFUSED, 0, fmt.Errorf("write failed: %w", err)
+			return EventDialRequestCompleted{
+				ResponseStatus: pb.DialResponse_E_DIAL_REFUSED,
+				Error:          fmt.Errorf("write failed: %w", err),
+			}
 		}
-		return pb.DialResponse_E_DIAL_REFUSED, 0, nil
+		return EventDialRequestCompleted{
+			ResponseStatus: pb.DialResponse_E_DIAL_REFUSED,
+		}
 	}
 
 	nonce := msg.GetDialRequest().Nonce
@@ -191,17 +213,28 @@ func (as *server) serveDialRequest(s network.Stream) (pb.DialResponse_ResponseSt
 		if err := w.WriteMsg(&msg); err != nil {
 			s.Reset()
 			log.Debugf("failed to write request rejected response to %s: %s", p, err)
-			return pb.DialResponse_E_REQUEST_REJECTED, 0, fmt.Errorf("write failed: %w", err)
+			return EventDialRequestCompleted{
+				ResponseStatus:   pb.DialResponse_E_REQUEST_REJECTED,
+				Error:            fmt.Errorf("write failed: %w", err),
+				DialDataRequired: true,
+			}
 		}
 		log.Debugf("rejected request from %s: rate limit exceeded", p)
-		return pb.DialResponse_E_REQUEST_REJECTED, 0, nil
+		return EventDialRequestCompleted{
+			ResponseStatus:   pb.DialResponse_E_REQUEST_REJECTED,
+			DialDataRequired: true,
+		}
 	}
 
 	if isDialDataRequired {
 		if err := getDialData(w, s, &msg, addrIdx); err != nil {
 			s.Reset()
 			log.Debugf("%s refused dial data request: %s", p, err)
-			return 0, 0, errDialDataRefused
+			return EventDialRequestCompleted{
+				Error:            errDialDataRefused,
+				DialDataRequired: true,
+				DialedAddr:       dialAddr,
+			}
 		}
 		// wait for a bit to prevent thundering herd style attacks on a victim
 		waitTime := time.Duration(rand.Intn(int(as.amplificatonAttackPreventionDialWait) + 1)) // the range is [0, n)
@@ -211,7 +244,7 @@ func (as *server) serveDialRequest(s network.Stream) (pb.DialResponse_ResponseSt
 		case <-ctx.Done():
 			s.Reset()
 			log.Debugf("rejecting request without dialing: %s %p ", p, ctx.Err())
-			return 0, 0, ctx.Err()
+			return EventDialRequestCompleted{Error: ctx.Err(), DialDataRequired: true, DialedAddr: dialAddr}
 		case <-t.C:
 		}
 	}
@@ -229,9 +262,21 @@ func (as *server) serveDialRequest(s network.Stream) (pb.DialResponse_ResponseSt
 	if err := w.WriteMsg(&msg); err != nil {
 		s.Reset()
 		log.Debugf("failed to write response to %s: %s", p, err)
-		return pb.DialResponse_OK, dialStatus, fmt.Errorf("write failed: %w", err)
+		return EventDialRequestCompleted{
+			ResponseStatus:   pb.DialResponse_OK,
+			DialStatus:       dialStatus,
+			Error:            fmt.Errorf("write failed: %w", err),
+			DialDataRequired: isDialDataRequired,
+			DialedAddr:       dialAddr,
+		}
 	}
-	return pb.DialResponse_OK, dialStatus, nil
+	return EventDialRequestCompleted{
+		ResponseStatus:   pb.DialResponse_OK,
+		DialStatus:       dialStatus,
+		Error:            nil,
+		DialDataRequired: isDialDataRequired,
+		DialedAddr:       dialAddr,
+	}
 }
 
 // getDialData gets data from the client for dialing the address
