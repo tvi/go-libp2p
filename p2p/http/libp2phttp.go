@@ -758,6 +758,10 @@ func (h *Host) RoundTrip(r *http.Request) (*http.Response, error) {
 	// Set the Opaque field to the http-path so that the HTTP request only makes
 	// a reference to that path and not the whole multiaddr uri
 	r.URL.Opaque = parsed.httpPath
+	if r.Host == "" {
+		// Fill in the host if it's not already set
+		r.Host = parsed.host + ":" + parsed.port
+	}
 	srt := streamRoundTripper{
 		server:       parsed.peer,
 		skipAddAddrs: true,

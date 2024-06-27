@@ -899,3 +899,56 @@ func TestRedirects(t *testing.T) {
 		})
 	}
 }
+
+func TestImpliedHostIsSet(t *testing.T) {
+	serverHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"))
+	require.NoError(t, err)
+	serverHttpHost := libp2phttp.Host{
+		StreamHost:        serverHost,
+		InsecureAllowHTTP: true,
+		ListenAddrs:       []ma.Multiaddr{ma.StringCast("/ip4/127.0.0.1/tcp/0/http")},
+	}
+	go serverHttpHost.Serve()
+	defer serverHttpHost.Close()
+
+	serverHttpHost.SetHTTPHandlerAtPath("/hi", "/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.Host, "localhost") || r.URL.Path != "/" {
+			fmt.Println("Host is", r.Host)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	clientStreamHost, err := libp2p.New(libp2p.NoListenAddrs, libp2p.Transport(libp2pquic.NewTransport))
+	require.NoError(t, err)
+	client := http.Client{Transport: &libp2phttp.Host{StreamHost: clientStreamHost}}
+
+	type testCase struct {
+		uri string
+	}
+	var testCases []testCase
+	for _, a := range serverHttpHost.Addrs() {
+		if _, err := a.ValueForProtocol(ma.P_HTTP); err == nil {
+			port, err := a.ValueForProtocol(ma.P_TCP)
+			require.NoError(t, err)
+			u := fmt.Sprintf("multiaddr:/dns/localhost/tcp/%s/http", port)
+			testCases = append(testCases, testCase{u})
+		} else {
+			port, err := a.ValueForProtocol(ma.P_UDP)
+			require.NoError(t, err)
+			u := fmt.Sprintf("multiaddr:/dns/localhost/udp/%s/quic-v1/p2p/%s", port, serverHost.ID())
+			testCases = append(testCases, testCase{u})
+		}
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.uri, func(t *testing.T) {
+			resp, err := client.Get(tc.uri)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+		})
+	}
+
+}
