@@ -28,6 +28,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	libp2phttp "github.com/libp2p/go-libp2p/p2p/http"
 	httpping "github.com/libp2p/go-libp2p/p2p/http/ping"
+	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 )
@@ -769,11 +770,15 @@ func TestHTTPHostAsRoundTripper(t *testing.T) {
 	}
 
 	serverHttpHost.SetHTTPHandlerAtPath("/hello", "/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		w.Write([]byte("hello"))
 	}))
 
 	// Different protocol.ID and mounted at a different path
-	serverHttpHost.SetHTTPHandlerAtPath("/hello-again", "/hello", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serverHttpHost.SetHTTPHandlerAtPath("/hello-again", "/hello2", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("hello"))
 	}))
 
@@ -805,6 +810,7 @@ func TestHTTPHostAsRoundTripper(t *testing.T) {
 		t.Run(tc, func(t *testing.T) {
 			resp, err := client.Get(tc)
 			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
 			defer resp.Body.Close()
 			body, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
@@ -821,4 +827,77 @@ func TestHTTPHostAsRoundTripperFailsWhenNoStreamHostPresent(t *testing.T) {
 	// Fails because we don't have a stream host available to make the request
 	require.Error(t, err)
 	require.ErrorContains(t, err, "Missing StreamHost")
+}
+
+// TestRedirects tests a client being redirected through multiple HTTP redirects
+func TestRedirects(t *testing.T) {
+	serverHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"))
+	require.NoError(t, err)
+	serverHttpHost := libp2phttp.Host{
+		StreamHost:        serverHost,
+		InsecureAllowHTTP: true,
+		ListenAddrs:       []ma.Multiaddr{ma.StringCast("/ip4/127.0.0.1/tcp/0/http")},
+	}
+	go serverHttpHost.Serve()
+	defer serverHttpHost.Close()
+
+	serverHttpHost.SetHTTPHandlerAtPath("/redirect-1/0.0.1", "/a", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/b/")
+		w.WriteHeader(http.StatusMovedPermanently)
+	}))
+
+	serverHttpHost.SetHTTPHandlerAtPath("/redirect-2/0.0.1", "/b", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/c/")
+		w.WriteHeader(http.StatusMovedPermanently)
+	}))
+
+	serverHttpHost.SetHTTPHandlerAtPath("/redirect-3/0.0.1", "/c", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/d/")
+		w.WriteHeader(http.StatusMovedPermanently)
+	}))
+
+	serverHttpHost.SetHTTPHandlerAtPath("/redirect-4/0.0.1", "/d", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("hello"))
+	}))
+
+	clientStreamHost, err := libp2p.New(libp2p.NoListenAddrs, libp2p.Transport(libp2pquic.NewTransport))
+	require.NoError(t, err)
+	client := http.Client{Transport: &libp2phttp.Host{StreamHost: clientStreamHost}}
+
+	type testCase struct {
+		initialURI  string
+		expectedURI string
+	}
+	var testCases []testCase
+	for _, a := range serverHttpHost.Addrs() {
+		if _, err := a.ValueForProtocol(ma.P_HTTP); err == nil {
+			port, err := a.ValueForProtocol(ma.P_TCP)
+			require.NoError(t, err)
+			u := fmt.Sprintf("multiaddr:%s/http-path/a%%2f", a)
+			f := fmt.Sprintf("http://127.0.0.1:%s/d/", port)
+			testCases = append(testCases, testCase{u, f})
+		} else {
+			u := fmt.Sprintf("multiaddr:%s/p2p/%s/http-path/a%%2f", a, serverHost.ID())
+			f := fmt.Sprintf("multiaddr:%s/p2p/%s/http-path/%%2Fd%%2F", a, serverHost.ID())
+			testCases = append(testCases, testCase{u, f})
+		}
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.initialURI, func(t *testing.T) {
+			// u := fmt.Sprintf("multiaddr:%s/p2p/%s/http-path/a%%2f", serverHost.Addrs()[0], serverHost.ID())
+			resp, err := client.Get(tc.initialURI)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, "hello", string(body))
+
+			// expectedFinalURI := fmt.Sprintf("multiaddr:%s/p2p/%s/http-path/%%2Fd%%2F", serverHost.Addrs()[0], serverHost.ID())
+			finalReqURL := *resp.Request.URL
+			finalReqURL.Opaque = "" // Clear the opaque so we can compare the URI
+			require.Equal(t, tc.expectedURI, finalReqURL.String())
+		})
+	}
 }
