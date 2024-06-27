@@ -885,7 +885,6 @@ func TestRedirects(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.initialURI, func(t *testing.T) {
-			// u := fmt.Sprintf("multiaddr:%s/p2p/%s/http-path/a%%2f", serverHost.Addrs()[0], serverHost.ID())
 			resp, err := client.Get(tc.initialURI)
 			require.NoError(t, err)
 			defer resp.Body.Close()
@@ -894,7 +893,6 @@ func TestRedirects(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "hello", string(body))
 
-			// expectedFinalURI := fmt.Sprintf("multiaddr:%s/p2p/%s/http-path/%%2Fd%%2F", serverHost.Addrs()[0], serverHost.ID())
 			finalReqURL := *resp.Request.URL
 			finalReqURL.Opaque = "" // Clear the opaque so we can compare the URI
 			require.Equal(t, tc.expectedURI, finalReqURL.String())
