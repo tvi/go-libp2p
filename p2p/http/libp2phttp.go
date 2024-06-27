@@ -750,10 +750,10 @@ func (h *Host) RoundTrip(r *http.Request) (*http.Response, error) {
 	if parsed.peer == "" {
 		return nil, fmt.Errorf("no peer ID in multiaddr")
 	}
-	addr, _ = ma.SplitFunc(addr, func(c ma.Component) bool {
-		return c.Protocol().Code == ma.P_P2P
+	withoutHTTPPath, _ := ma.SplitFunc(addr, func(c ma.Component) bool {
+		return c.Protocol().Code == ma.P_HTTP_PATH
 	})
-	h.StreamHost.Peerstore().AddAddrs(parsed.peer, []ma.Multiaddr{addr}, peerstore.TempAddrTTL)
+	h.StreamHost.Peerstore().AddAddrs(parsed.peer, []ma.Multiaddr{withoutHTTPPath}, peerstore.TempAddrTTL)
 
 	// Set the Opaque field to the http-path so that the HTTP request only makes
 	// a reference to that path and not the whole multiaddr uri
