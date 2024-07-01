@@ -14,7 +14,7 @@ type MetricsTracer interface {
 const metricNamespace = "libp2p_autonatv2"
 
 var (
-	requestsComplted = prometheus.NewCounterVec(
+	requestsCompleted = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricNamespace,
 			Name:      "requests_completed_total",
@@ -28,7 +28,7 @@ type metricsTracer struct {
 }
 
 func NewMetricsTracer(reg prometheus.Registerer) MetricsTracer {
-	metricshelper.RegisterCollectors(reg, requestsComplted)
+	metricshelper.RegisterCollectors(reg, requestsCompleted)
 	return &metricsTracer{}
 }
 
@@ -57,7 +57,7 @@ func (m *metricsTracer) CompletedRequest(e EventDialRequestCompleted) {
 		ip,
 		transport,
 	)
-	requestsComplted.WithLabelValues(*labels...).Inc()
+	requestsCompleted.WithLabelValues(*labels...).Inc()
 }
 
 func getIPOrDNSVersion(a ma.Multiaddr) string {
