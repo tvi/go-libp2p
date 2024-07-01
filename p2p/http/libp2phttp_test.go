@@ -912,12 +912,11 @@ func TestImpliedHostIsSet(t *testing.T) {
 	defer serverHttpHost.Close()
 
 	serverHttpHost.SetHTTPHandlerAtPath("/hi", "/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.Host, "localhost") || r.URL.Path != "/" {
-			fmt.Println("Host is", r.Host)
-			w.WriteHeader(http.StatusNotFound)
+		if strings.HasPrefix(r.Host, "localhost") && r.URL.Path == "/" {
+			w.WriteHeader(http.StatusOK)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusNotFound)
 	}))
 
 	clientStreamHost, err := libp2p.New(libp2p.NoListenAddrs, libp2p.Transport(libp2pquic.NewTransport))
