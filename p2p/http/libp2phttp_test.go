@@ -900,6 +900,51 @@ func TestRedirects(t *testing.T) {
 	}
 }
 
+// TestMultiaddrURIRedirect tests that we can redirect using a multiaddr URI. We
+// redirect from the http transport to the stream based transport
+func TestMultiaddrURIRedirect(t *testing.T) {
+	serverHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"))
+	require.NoError(t, err)
+	serverHttpHost := libp2phttp.Host{
+		StreamHost:        serverHost,
+		InsecureAllowHTTP: true,
+		ListenAddrs:       []ma.Multiaddr{ma.StringCast("/ip4/127.0.0.1/tcp/0/http")},
+	}
+	go serverHttpHost.Serve()
+	defer serverHttpHost.Close()
+
+	var httpMultiaddr ma.Multiaddr
+	var streamMultiaddr ma.Multiaddr
+	for _, a := range serverHttpHost.Addrs() {
+		if _, err := a.ValueForProtocol(ma.P_HTTP); err == nil {
+			httpMultiaddr = a
+		} else {
+			streamMultiaddr = a
+		}
+	}
+	require.NotNil(t, httpMultiaddr)
+	require.NotNil(t, streamMultiaddr)
+
+	// Redirect to a whole other transport!
+	serverHttpHost.SetHTTPHandlerAtPath("/redirect-1/0.0.1", "/a", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", fmt.Sprintf("multiaddr:%s/p2p/%s/http-path/b", streamMultiaddr, serverHost.ID()))
+		w.WriteHeader(http.StatusMovedPermanently)
+	}))
+
+	serverHttpHost.SetHTTPHandlerAtPath("/redirect-2/0.0.1", "/b", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	clientStreamHost, err := libp2p.New(libp2p.NoListenAddrs, libp2p.Transport(libp2pquic.NewTransport))
+	require.NoError(t, err)
+	client := http.Client{Transport: &libp2phttp.Host{StreamHost: clientStreamHost}}
+
+	resp, err := client.Get(fmt.Sprintf("multiaddr:%s/http-path/a", httpMultiaddr))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.True(t, strings.HasPrefix(resp.Request.URL.RawPath, streamMultiaddr.String()), "expected redirect to stream transport")
+}
+
 func TestImpliedHostIsSet(t *testing.T) {
 	serverHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/udp/0/quic-v1"))
 	require.NoError(t, err)
