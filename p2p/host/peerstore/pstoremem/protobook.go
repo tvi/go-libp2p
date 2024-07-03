@@ -51,7 +51,7 @@ func NewProtoBook(opts ...ProtoBookOption) (*memoryProtoBook, error) {
 			}
 			return ret
 		}(),
-		maxProtos: 1024,
+		maxProtos: 128,
 	}
 
 	for _, opt := range opts {
