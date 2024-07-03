@@ -27,8 +27,7 @@ type memoryProtoBook struct {
 
 	maxProtos int
 
-	lk       sync.RWMutex
-	interned map[protocol.ID]protocol.ID
+	lk sync.RWMutex
 }
 
 var _ pstore.ProtoBook = (*memoryProtoBook)(nil)
@@ -44,7 +43,6 @@ func WithMaxProtocols(num int) ProtoBookOption {
 
 func NewProtoBook(opts ...ProtoBookOption) (*memoryProtoBook, error) {
 	pb := &memoryProtoBook{
-		interned: make(map[protocol.ID]protocol.ID, 256),
 		segments: func() (ret protoSegments) {
 			for i := range ret {
 				ret[i] = &protoSegment{
@@ -64,30 +62,6 @@ func NewProtoBook(opts ...ProtoBookOption) (*memoryProtoBook, error) {
 	return pb, nil
 }
 
-func (pb *memoryProtoBook) internProtocol(proto protocol.ID) protocol.ID {
-	// check if it is interned with the read lock
-	pb.lk.RLock()
-	interned, ok := pb.interned[proto]
-	pb.lk.RUnlock()
-
-	if ok {
-		return interned
-	}
-
-	// intern with the write lock
-	pb.lk.Lock()
-	defer pb.lk.Unlock()
-
-	// check again in case it got interned in between locks
-	interned, ok = pb.interned[proto]
-	if ok {
-		return interned
-	}
-
-	pb.interned[proto] = proto
-	return proto
-}
-
 func (pb *memoryProtoBook) SetProtocols(p peer.ID, protos ...protocol.ID) error {
 	if len(protos) > pb.maxProtos {
 		return errTooManyProtocols
@@ -95,7 +69,7 @@ func (pb *memoryProtoBook) SetProtocols(p peer.ID, protos ...protocol.ID) error 
 
 	newprotos := make(map[protocol.ID]struct{}, len(protos))
 	for _, proto := range protos {
-		newprotos[pb.internProtocol(proto)] = struct{}{}
+		newprotos[proto] = struct{}{}
 	}
 
 	s := pb.segments.get(p)
@@ -121,7 +95,7 @@ func (pb *memoryProtoBook) AddProtocols(p peer.ID, protos ...protocol.ID) error 
 	}
 
 	for _, proto := range protos {
-		protomap[pb.internProtocol(proto)] = struct{}{}
+		protomap[proto] = struct{}{}
 	}
 	return nil
 }
@@ -151,7 +125,10 @@ func (pb *memoryProtoBook) RemoveProtocols(p peer.ID, protos ...protocol.ID) err
 	}
 
 	for _, proto := range protos {
-		delete(protomap, pb.internProtocol(proto))
+		delete(protomap, proto)
+	}
+	if len(protomap) == 0 {
+		delete(s.protocols, p)
 	}
 	return nil
 }
