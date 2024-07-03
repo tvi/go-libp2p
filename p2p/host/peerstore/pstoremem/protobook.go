@@ -26,8 +26,6 @@ type memoryProtoBook struct {
 	segments protoSegments
 
 	maxProtos int
-
-	lk sync.RWMutex
 }
 
 var _ pstore.ProtoBook = (*memoryProtoBook)(nil)
