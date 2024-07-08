@@ -377,7 +377,10 @@ func TestRoutedHost(t *testing.T) {
 }
 
 func TestAutoNATService(t *testing.T) {
-	h, err := New(EnableNATService())
+	// h, err := New(EnableNATService())
+	// require.NoError(t, err)
+	// h.Close()
+	h, err := New(EnableNATService(), EnableAutoRelayWithStaticRelays([]peer.AddrInfo{{ID: peer.ID("hello")}}))
 	require.NoError(t, err)
 	h.Close()
 }
