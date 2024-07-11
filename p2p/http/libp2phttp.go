@@ -499,6 +499,8 @@ func (rt *streamRoundTripper) RoundTrip(r *http.Request) (*http.Response, error)
 	return resp, nil
 }
 
+var errNotRelative = errors.New("not relative")
+
 // relativeMultiaddrURIToAbs takes a relative multiaddr URI and turns it into an
 // absolute one. Useful, for example, when a server gives us a relative URI for a redirect.
 // It allows the following request (the one after redirected) to reach the correct server.
@@ -510,7 +512,7 @@ func relativeMultiaddrURIToAbs(original *url.URL, relative *url.URL) (*url.URL, 
 	// multiaddr://here-instead.
 	if relative.OmitHost {
 		// Not relative (at least we can't tell). Nothing we can do here
-		return nil, errors.New("not relative")
+		return nil, errNotRelative
 	}
 	originalStr := original.RawPath
 	if originalStr == "" {
