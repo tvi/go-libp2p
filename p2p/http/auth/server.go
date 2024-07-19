@@ -79,23 +79,13 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			hostname:  f.hostname,
 			createdAt: time.Now(),
 		}
-		b := pool.Get(4096)
-		defer pool.Put(b)
-		b, err = genBearerTokenBlob(b[:0], a.PrivKey, tok)
+		b, err := genBearerAuthHeader(a.PrivKey, tok)
 		if err != nil {
 			log.Debugf("failed to generate bearer token: %s", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		blobB64 := pool.Get(len(BearerAuthScheme) + 1 + base64.URLEncoding.EncodedLen(len(b)))
-		defer pool.Put(blobB64)
-
-		blobB64 = blobB64[:0]
-		blobB64 = append(blobB64, BearerAuthScheme...)
-		blobB64 = append(blobB64, ' ')
-		blobB64 = b64AppendEncode(blobB64, b)
-
-		w.Header().Set("Authorization", string(blobB64))
+		w.Header().Set("Authorization", b)
 
 		if base64.URLEncoding.DecodedLen(len(f.challengeServerB64)) >= challengeLen {
 			clientID, err := peer.IDFromPublicKey(f.pubKey)
@@ -120,6 +110,11 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			authInfoVal := fmt.Sprintf("%s peer-id=%s, sig=%s", PeerIDAuthScheme, myId.String(), base64.URLEncoding.EncodeToString(buf))
 			w.Header().Set("Authentication-Info", authInfoVal)
+		} else {
+			// Only supporting mutual auth for now. Fail because the client didn't want to authenticate us.
+			log.Debugf("Client did not provide challenge-server")
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
 
 		if a.Next != nil {
@@ -219,6 +214,23 @@ type bearerToken struct {
 	peer      peer.ID
 	hostname  string
 	createdAt time.Time
+}
+
+func genBearerAuthHeader(privKey crypto.PrivKey, t bearerToken) (string, error) {
+	b := pool.Get(4096)
+	defer pool.Put(b)
+	b, err := genBearerTokenBlob(b[:0], privKey, t)
+	if err != nil {
+		return "", err
+	}
+	blobB64 := pool.Get(len(BearerAuthScheme) + 1 + base64.URLEncoding.EncodedLen(len(b)))
+	defer pool.Put(blobB64)
+
+	blobB64 = blobB64[:0]
+	blobB64 = append(blobB64, BearerAuthScheme...)
+	blobB64 = append(blobB64, ' ')
+	blobB64 = b64AppendEncode(blobB64, b)
+	return string(blobB64), nil
 }
 
 func genBearerTokenBlob(buf []byte, privKey crypto.PrivKey, t bearerToken) ([]byte, error) {
