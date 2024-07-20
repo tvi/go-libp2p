@@ -492,8 +492,9 @@ func (cfg *Config) NewNode() (host.Host, error) {
 		return addrs
 	}
 
+	// enable autorelay
 	fxopts = append(fxopts,
-		fx.Invoke(func(h *bhost.BasicHost, lifecycle fx.Lifecycle) (*autorelay.AutoRelay, error) {
+		fx.Invoke(func(h *bhost.BasicHost, lifecycle fx.Lifecycle) error {
 			oldAddrFactory = h.AddrsFactory
 			if cfg.EnableAutoRelay {
 				if !cfg.DisableMetrics {
@@ -505,12 +506,12 @@ func (cfg *Config) NewNode() (host.Host, error) {
 
 				ar, err := autorelay.NewAutoRelay(h, cfg.AutoRelayOpts...)
 				if err != nil {
-					return nil, err
+					return err
 				}
 				lifecycle.Append(fx.StartStopHook(ar.Start, ar.Close))
-				return ar, nil
+				return nil
 			}
-			return nil, nil
+			return nil
 		}),
 	)
 
