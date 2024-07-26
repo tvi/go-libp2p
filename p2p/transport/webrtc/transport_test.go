@@ -19,6 +19,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	tpt "github.com/libp2p/go-libp2p/core/transport"
+	"github.com/libp2p/go-libp2p/p2p/transport/quicreuse"
 	ma "github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/multiformats/go-multibase"
@@ -34,7 +35,10 @@ func getTransport(t *testing.T, opts ...Option) (*WebRTCTransport, peer.ID) {
 	privKey, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	require.NoError(t, err)
 	rcmgr := &network.NullResourceManager{}
-	transport, err := New(privKey, nil, nil, rcmgr, opts...)
+	var resetKey [32]byte
+	connmgr, err := quicreuse.NewConnManager(resetKey, resetKey)
+	require.NoError(t, err)
+	transport, err := New(privKey, nil, nil, rcmgr, connmgr, opts...)
 	require.NoError(t, err)
 	peerID, err := peer.IDFromPrivateKey(privKey)
 	require.NoError(t, err)
@@ -45,7 +49,10 @@ func getTransport(t *testing.T, opts ...Option) (*WebRTCTransport, peer.ID) {
 func TestNullRcmgrTransport(t *testing.T) {
 	privKey, _, err := crypto.GenerateKeyPair(crypto.Ed25519, -1)
 	require.NoError(t, err)
-	transport, err := New(privKey, nil, nil, nil)
+	var resetKey [32]byte
+	connmgr, err := quicreuse.NewConnManager(resetKey, resetKey)
+	require.NoError(t, err)
+	transport, err := New(privKey, nil, nil, nil, connmgr)
 	require.NoError(t, err)
 
 	listenTransport, pid := getTransport(t)

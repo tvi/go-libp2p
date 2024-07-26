@@ -12,11 +12,13 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-type refCountedQuicTransport interface {
+type RefCountedQuicTransport interface {
 	LocalAddr() net.Addr
 
 	// Used to send packets directly around QUIC. Useful for hole punching.
 	WriteTo([]byte, net.Addr) (int, error)
+
+	ReadNonQUICPacket(ctx context.Context, b []byte) (int, net.Addr, error) // interop with webrtc
 
 	Close() error
 

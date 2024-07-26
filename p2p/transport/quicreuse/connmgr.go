@@ -94,7 +94,7 @@ func (c *ConnManager) ListenQUIC(addr ma.Multiaddr, tlsConf *tls.Config, allowWi
 	key := laddr.String()
 	entry, ok := c.quicListeners[key]
 	if !ok {
-		tr, err := c.transportForListen(netw, laddr)
+		tr, err := c.TransportForListen(netw, laddr)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +131,7 @@ func (c *ConnManager) onListenerClosed(key string) {
 	}
 }
 
-func (c *ConnManager) transportForListen(network string, laddr *net.UDPAddr) (refCountedQuicTransport, error) {
+func (c *ConnManager) TransportForListen(network string, laddr *net.UDPAddr) (RefCountedQuicTransport, error) {
 	if c.enableReuseport {
 		reuse, err := c.getReuse(network)
 		if err != nil {
@@ -186,7 +186,7 @@ func (c *ConnManager) DialQUIC(ctx context.Context, raddr ma.Multiaddr, tlsConf 
 	return conn, nil
 }
 
-func (c *ConnManager) TransportForDial(network string, raddr *net.UDPAddr) (refCountedQuicTransport, error) {
+func (c *ConnManager) TransportForDial(network string, raddr *net.UDPAddr) (RefCountedQuicTransport, error) {
 	if c.enableReuseport {
 		reuse, err := c.getReuse(network)
 		if err != nil {

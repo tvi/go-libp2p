@@ -96,7 +96,7 @@ func TestConnectionPassedToQUICForListening(t *testing.T) {
 
 	_, err = cm.ListenQUIC(raddr, &tls.Config{NextProtos: []string{"proto"}}, nil)
 	require.NoError(t, err)
-	quicTr, err := cm.transportForListen(netw, naddr)
+	quicTr, err := cm.TransportForListen(netw, naddr)
 	require.NoError(t, err)
 	defer quicTr.Close()
 	if _, ok := quicTr.(*singleOwnerTransport).Transport.Conn.(quic.OOBCapablePacketConn); !ok {

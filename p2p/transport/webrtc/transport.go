@@ -36,6 +36,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/sec"
 	tpt "github.com/libp2p/go-libp2p/core/transport"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
+	"github.com/libp2p/go-libp2p/p2p/transport/quicreuse"
 	"github.com/libp2p/go-libp2p/p2p/transport/webrtc/pb"
 	"github.com/libp2p/go-msgio"
 
@@ -84,6 +85,7 @@ type WebRTCTransport struct {
 	webrtcConfig webrtc.Configuration
 	rcmgr        network.ResourceManager
 	gater        connmgr.ConnectionGater
+	connManager  *quicreuse.ConnManager
 	privKey      ic.PrivKey
 	noiseTpt     *noise.Transport
 	localPeerId  peer.ID
@@ -105,7 +107,7 @@ type iceTimeouts struct {
 	Keepalive  time.Duration
 }
 
-func New(privKey ic.PrivKey, psk pnet.PSK, gater connmgr.ConnectionGater, rcmgr network.ResourceManager, opts ...Option) (*WebRTCTransport, error) {
+func New(privKey ic.PrivKey, psk pnet.PSK, gater connmgr.ConnectionGater, rcmgr network.ResourceManager, mgr *quicreuse.ConnManager, opts ...Option) (*WebRTCTransport, error) {
 	if psk != nil {
 		log.Error("WebRTC doesn't support private networks yet.")
 		return nil, fmt.Errorf("WebRTC doesn't support private networks yet")
@@ -158,6 +160,7 @@ func New(privKey ic.PrivKey, psk pnet.PSK, gater connmgr.ConnectionGater, rcmgr 
 		},
 
 		maxInFlightConnections: DefaultMaxInFlightConnections,
+		connManager:            mgr,
 	}
 	for _, opt := range opts {
 		if err := opt(transport); err != nil {
@@ -191,6 +194,7 @@ func (t *WebRTCTransport) Listen(addr ma.Multiaddr) (tpt.Listener, error) {
 	if !isWebrtc {
 		return nil, fmt.Errorf("must listen on webrtc multiaddr")
 	}
+
 	nw, host, err := manet.DialArgs(addr)
 	if err != nil {
 		return nil, fmt.Errorf("listener could not fetch dialargs: %w", err)
@@ -199,21 +203,70 @@ func (t *WebRTCTransport) Listen(addr ma.Multiaddr) (tpt.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listener could not resolve udp address: %w", err)
 	}
-
-	socket, err := net.ListenUDP(nw, udpAddr)
+	qt, err := t.connManager.TransportForListen(nw, udpAddr)
 	if err != nil {
-		return nil, fmt.Errorf("listen on udp: %w", err)
+		return nil, fmt.Errorf("failed to get packet conn: %w", err)
 	}
 
-	listener, err := t.listenSocket(socket)
+	listener, err := t.listenSocket(packetConnFromQuicTransport(qt))
 	if err != nil {
-		socket.Close()
+		qt.DecreaseCount()
 		return nil, err
 	}
 	return listener, nil
 }
 
-func (t *WebRTCTransport) listenSocket(socket *net.UDPConn) (tpt.Listener, error) {
+type pconn struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	qt     quicreuse.RefCountedQuicTransport
+}
+
+// Close implements net.PacketConn.
+func (p *pconn) Close() error {
+	p.qt.DecreaseCount()
+	p.cancel()
+	return nil
+}
+
+// LocalAddr implements net.PacketConn.
+func (p *pconn) LocalAddr() net.Addr {
+	return p.qt.LocalAddr()
+}
+
+// ReadFrom implements net.PacketConn.
+func (p *pconn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
+	return p.qt.ReadNonQUICPacket(p.ctx, b)
+}
+
+// SetDeadline implements net.PacketConn.
+func (p *pconn) SetDeadline(t time.Time) error {
+	return nil
+}
+
+// SetReadDeadline implements net.PacketConn.
+func (p *pconn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+// SetWriteDeadline implements net.PacketConn.
+func (p *pconn) SetWriteDeadline(t time.Time) error {
+	return nil
+}
+
+// WriteTo implements net.PacketConn.
+func (p *pconn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
+	return p.qt.WriteTo(b, addr)
+}
+
+var _ net.PacketConn = &pconn{}
+
+func packetConnFromQuicTransport(qt quicreuse.RefCountedQuicTransport) net.PacketConn {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &pconn{ctx: ctx, cancel: cancel, qt: qt}
+}
+
+func (t *WebRTCTransport) listenSocket(socket net.PacketConn) (tpt.Listener, error) {
 	listenerMultiaddr, err := manet.FromNetAddr(socket.LocalAddr())
 	if err != nil {
 		return nil, err
