@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -419,6 +420,7 @@ func TestMain(m *testing.M) {
 		m,
 		// This will return eventually (5s timeout) but doesn't take a context.
 		goleak.IgnoreAnyFunction("github.com/koron/go-ssdp.Search"),
+		goleak.IgnoreAnyFunction("github.com/pion/sctp.(*Stream).SetReadDeadline.func1"),
 		// Logging & Stats
 		goleak.IgnoreTopFunction("github.com/ipfs/go-log/v2/writer.(*MirrorWriter).logRoutine"),
 		goleak.IgnoreTopFunction("go.opencensus.io/stats/view.(*worker).start"),
@@ -548,8 +550,25 @@ func TestWebRTCReuseAddrWithQUIC(t *testing.T) {
 		})
 	}
 
+	swapPort := func(addrStrs []string, newPort string) []string {
+		out := make([]string, 0, len(addrStrs))
+		for _, addrStr := range addrStrs {
+			out = append(out, strings.Replace(addrStr, "54322", newPort, 1))
+		}
+		return out
+	}
+
 	t.Run("setup with no reuseport. Should fail", func(t *testing.T) {
-		h1, err := New(ListenAddrStrings(order[0]...), Transport(quic.NewTransport), Transport(libp2pwebrtc.New), QUICReuse(quicreuse.NewConnManager, quicreuse.DisableReuseport()))
+		h1, err := New(ListenAddrStrings(swapPort(order[0], "54323")...), Transport(quic.NewTransport), Transport(libp2pwebrtc.New), QUICReuse(quicreuse.NewConnManager, quicreuse.DisableReuseport()))
+		require.NoError(t, err) // It's a bug/feature that swarm.Listen does not error if at least one transport succeeds in listening.
+		defer h1.Close()
+		// Check that webrtc did fail to listen
+		require.Equal(t, 1, len(h1.Addrs()))
+		require.Contains(t, h1.Addrs()[0].String(), "quic-v1")
+	})
+
+	t.Run("setup with autonat", func(t *testing.T) {
+		h1, err := New(EnableAutoNATv2(), ListenAddrStrings(swapPort(order[0], "54324")...), Transport(quic.NewTransport), Transport(libp2pwebrtc.New), QUICReuse(quicreuse.NewConnManager, quicreuse.DisableReuseport()))
 		require.NoError(t, err) // It's a bug/feature that swarm.Listen does not error if at least one transport succeeds in listening.
 		defer h1.Close()
 		// Check that webrtc did fail to listen

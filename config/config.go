@@ -287,6 +287,29 @@ func (cfg *Config) addTransports() ([]fx.Option, error) {
 		fx.Provide(func() pnet.PSK { return cfg.PSK }),
 		fx.Provide(func() network.ResourceManager { return cfg.ResourceManager }),
 		fx.Provide(func() *madns.Resolver { return cfg.MultiaddrResolver }),
+		fx.Provide(func(cm *quicreuse.ConnManager, sw *swarm.Swarm) libp2pwebrtc.ListenUDPFn {
+			hasQuicAddrPortFor := func(network string, laddr *net.UDPAddr) bool {
+				quicAddrPorts := map[string]struct{}{}
+				for _, addr := range sw.ListenAddresses() {
+					if _, err := addr.ValueForProtocol(ma.P_QUIC_V1); err == nil {
+						netw, addr, err := manet.DialArgs(addr)
+						if err != nil {
+							return false
+						}
+						quicAddrPorts[netw+"_"+addr] = struct{}{}
+					}
+				}
+				_, ok := quicAddrPorts[network+"_"+laddr.String()]
+				return ok
+			}
+
+			return func(network string, laddr *net.UDPAddr) (net.PacketConn, error) {
+				if hasQuicAddrPortFor(network, laddr) {
+					return cm.SharedNonQUICPacketConn(network, laddr)
+				}
+				return net.ListenUDP(network, laddr)
+			}
+		}),
 	}
 	fxopts = append(fxopts, cfg.Transports...)
 	if cfg.Insecure {
@@ -453,29 +476,6 @@ func (cfg *Config) NewNode() (host.Host, error) {
 			}
 			lifecycle.Append(fx.StopHook(sw.Close))
 			return sw, nil
-		}),
-		fx.Provide(func(cm *quicreuse.ConnManager, sw *swarm.Swarm) libp2pwebrtc.ListenUDPFn {
-			hasQuicAddrPortFor := func(network string, laddr *net.UDPAddr) bool {
-				quicAddrPorts := map[string]struct{}{}
-				for _, addr := range sw.ListenAddresses() {
-					if _, err := addr.ValueForProtocol(ma.P_QUIC_V1); err == nil {
-						netw, addr, err := manet.DialArgs(addr)
-						if err != nil {
-							return false
-						}
-						quicAddrPorts[netw+"_"+addr] = struct{}{}
-					}
-				}
-				_, ok := quicAddrPorts[network+"_"+laddr.String()]
-				return ok
-			}
-
-			return func(network string, laddr *net.UDPAddr) (net.PacketConn, error) {
-				if hasQuicAddrPortFor(network, laddr) {
-					return cm.SharedNonQUICPacketConn(network, laddr)
-				}
-				return net.ListenUDP(network, laddr)
-			}
 		}),
 		// Make sure the swarm constructor depends on the quicreuse.ConnManager.
 		// That way, the ConnManager will be started before the swarm, and more importantly,
