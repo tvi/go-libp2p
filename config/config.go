@@ -407,9 +407,9 @@ func (cfg *Config) newBasicHost(swrm *swarm.Swarm, eventBus event.Bus) (*bhost.B
 		// addresses by default.
 		//
 		// TODO: We shouldn't be doing this here.
-		oldFactory := h.AddrsFactory
+		originalAddrFactory := h.AddrsFactory
 		h.AddrsFactory = func(addrs []ma.Multiaddr) []ma.Multiaddr {
-			return oldFactory(autorelay.Filter(addrs))
+			return originalAddrFactory(autorelay.Filter(addrs))
 		}
 	}
 	return h, nil
@@ -486,16 +486,18 @@ func (cfg *Config) NewNode() (host.Host, error) {
 		)
 	}
 
-	// oldAddrFactory is the AddrFactory before it's modified by autorelay
+	// originalAddrFactory is the AddrFactory before it's modified by autorelay
 	// we need this for checking reachability via autonat
-	oldAddrFactory := func(addrs []ma.Multiaddr) []ma.Multiaddr {
+	originalAddrFactory := func(addrs []ma.Multiaddr) []ma.Multiaddr {
 		return addrs
 	}
 
 	// enable autorelay
 	fxopts = append(fxopts,
+		fx.Invoke(func(h *bhost.BasicHost) {
+			originalAddrFactory = h.AddrsFactory
+		}),
 		fx.Invoke(func(h *bhost.BasicHost, lifecycle fx.Lifecycle) error {
-			oldAddrFactory = h.AddrsFactory
 			if cfg.EnableAutoRelay {
 				if !cfg.DisableMetrics {
 					mt := autorelay.WithMetricsTracer(
@@ -531,7 +533,7 @@ func (cfg *Config) NewNode() (host.Host, error) {
 		return nil, err
 	}
 
-	if err := cfg.addAutoNAT(bh, oldAddrFactory); err != nil {
+	if err := cfg.addAutoNAT(bh, originalAddrFactory); err != nil {
 		app.Stop(context.Background())
 		if cfg.Routing != nil {
 			rh.Close()
