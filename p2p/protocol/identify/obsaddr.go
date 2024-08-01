@@ -226,11 +226,23 @@ func (o *ObservedAddrManager) appendInferredAddrs(twToObserverSets map[string][]
 			twToObserverSets[localTWStr] = append(twToObserverSets[localTWStr], o.getTopExternalAddrs(localTWStr)...)
 		}
 	}
-	for _, a := range o.listenAddrs() {
+	lAddrs, err := o.interfaceListenAddrs()
+	if err != nil {
+		log.Warnw("failed to get interface resolved listen addrs. Using just the listen addrs", "error", err)
+		lAddrs = nil
+	}
+	lAddrs = append(lAddrs, o.listenAddrs()...)
+	seenTWs := make(map[string]struct{})
+	for _, a := range lAddrs {
 		if _, ok := o.localAddrs[string(a.Bytes())]; ok {
 			// We already have this address in the list
 			continue
 		}
+		if _, ok := seenTWs[string(a.Bytes())]; ok {
+			// We've already added this
+			continue
+		}
+		seenTWs[string(a.Bytes())] = struct{}{}
 		a = o.normalize(a)
 		t, err := thinWaistForm(a)
 		if err != nil {
