@@ -16,6 +16,7 @@ import (
 
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/pion/datachannel"
+	"github.com/pion/sctp"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -151,6 +152,11 @@ func (c *connection) OpenStream(ctx context.Context) (network.MuxedStream, error
 	streamID := uint16(id)
 	dc, err := c.pc.CreateDataChannel("", &webrtc.DataChannelInit{ID: &streamID})
 	if err != nil {
+		if errors.Is(err, sctp.ErrStreamClosed) {
+			c.closeOnce.Do(func() {
+				c.closeWithError(errors.New("connection closed"))
+			})
+		}
 		return nil, err
 	}
 	rwc, err := c.detachChannel(ctx, dc)
