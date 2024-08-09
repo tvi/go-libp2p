@@ -593,6 +593,9 @@ func (h *BasicHost) background() {
 		// Request addresses anyways because, technically, address filters still apply.
 		// The underlying AllAddrs call is effectively a no-op.
 		curr := h.Addrs()
+		if h.ctx.Err() != nil {
+			return
+		}
 		emitAddrChange(curr, lastAddrs)
 		lastAddrs = curr
 
@@ -677,6 +680,9 @@ func (h *BasicHost) RemoveStreamHandler(pid protocol.ID) {
 // to create one. If ProtocolID is "", writes no header.
 // (Thread-safe)
 func (h *BasicHost) NewStream(ctx context.Context, p peer.ID, pids ...protocol.ID) (str network.Stream, strErr error) {
+	if h.ctx.Err() != nil {
+		return nil, h.ctx.Err()
+	}
 	// If the caller wants to prevent the host from dialing, it should use the NoDial option.
 	if nodial, _ := network.GetNoDial(ctx); !nodial {
 		err := h.Connect(ctx, peer.AddrInfo{ID: p})
@@ -772,6 +778,9 @@ func (h *BasicHost) preferredProtocol(p peer.ID, pids []protocol.ID) (protocol.I
 // Connect will absorb the addresses in pi into its internal peerstore.
 // It will also resolve any /dns4, /dns6, and /dnsaddr addresses.
 func (h *BasicHost) Connect(ctx context.Context, pi peer.AddrInfo) error {
+	if h.ctx.Err() != nil {
+		return h.ctx.Err()
+	}
 	// absorb addresses into peerstore
 	h.Peerstore().AddAddrs(pi.ID, pi.Addrs, peerstore.TempAddrTTL)
 
@@ -848,6 +857,9 @@ func (h *BasicHost) NormalizeMultiaddr(addr ma.Multiaddr) ma.Multiaddr {
 // The output has webtransport addresses inferred from quic addresses.
 // All the addresses have the correct
 func (h *BasicHost) AllAddrs() []ma.Multiaddr {
+	if h.ctx.Err() != nil {
+		return nil
+	}
 	listenAddrs := h.Network().ListenAddresses()
 	if len(listenAddrs) == 0 {
 		return nil
@@ -1081,15 +1093,7 @@ func (h *BasicHost) Close() error {
 		_ = h.emitters.evtLocalAddrsUpdated.Close()
 
 		h.psManager.Close()
-		if h.Peerstore() != nil {
-			h.Peerstore().Close()
-		}
-
 		h.refCount.Wait()
-
-		if h.Network().ResourceManager() != nil {
-			h.Network().ResourceManager().Close()
-		}
 	})
 
 	return nil

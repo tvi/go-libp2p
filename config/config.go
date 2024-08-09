@@ -474,13 +474,18 @@ func (cfg *Config) NewNode() (host.Host, error) {
 			if err != nil {
 				return nil, err
 			}
-			lifecycle.Append(fx.StopHook(sw.Close))
 			return sw, nil
 		}),
+		fx.Provide(func() peerstore.Peerstore {
+			return cfg.Peerstore
+		}),
+		// Setup OnStop hooks
 		// Make sure the swarm constructor depends on the quicreuse.ConnManager.
 		// That way, the ConnManager will be started before the swarm, and more importantly,
 		// the swarm will be stopped before the ConnManager.
-		fx.Decorate(func(sw *swarm.Swarm, _ *quicreuse.ConnManager, lifecycle fx.Lifecycle) *swarm.Swarm {
+		fx.Decorate(func(sw *swarm.Swarm, _ *quicreuse.ConnManager, peerstore peerstore.Peerstore, rcmgr network.ResourceManager, lifecycle fx.Lifecycle) *swarm.Swarm {
+			lifecycle.Append(fx.StopHook(peerstore.Close))
+			lifecycle.Append(fx.StopHook(rcmgr.Close))
 			lifecycle.Append(fx.Hook{
 				OnStart: func(context.Context) error {
 					// TODO: This method succeeds if listening on one address succeeds. We
