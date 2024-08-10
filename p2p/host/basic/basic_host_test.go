@@ -84,6 +84,7 @@ func TestMultipleClose(t *testing.T) {
 	require.NoError(t, h.Close())
 	require.NoError(t, h.Close())
 	h2, err := NewHost(swarmt.GenSwarm(t), nil)
+	require.NoError(t, err)
 	defer h2.Close()
 	require.Error(t, h.Connect(context.Background(), peer.AddrInfo{ID: h2.ID(), Addrs: h2.Addrs()}))
 	h.Network().Peerstore().AddAddrs(h2.ID(), h2.Addrs(), peerstore.PermanentAddrTTL)
