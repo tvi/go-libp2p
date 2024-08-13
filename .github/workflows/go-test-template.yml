@@ -104,11 +104,15 @@ jobs:
         if: hashFiles('./.github/actions/go-test-setup') != ''
       - name: Build testing tools
         run: cd scripts/test_analysis && go build -o gotest2sql github.com/marcopolo/gotest2sql
+      - name: Build test_analysis
+        run: cd scripts/test_analysis && go build -o test_analysis .
+      - name: Put tools in PATH
+        run: cd scripts/test_analysis && echo $PWD >> $GITHUB_PATH
       - name: Run tests
         if: contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
         uses: protocol/multiple-go-modules@v1.4
         with:
-          run: go test -json ${{ env.GOTESTFLAGS }} ./... | ./scripts/test_analysis/gotest2sql -output ./test_results.db
+          run: test_analysis ${{ env.GOTESTFLAGS }}
       - name: Upload test results
         uses: actions/upload-artifact@v3
         with:
@@ -123,13 +127,13 @@ jobs:
         uses: protocol/multiple-go-modules@v1.4
         with:
           run: go test -race ${{ env.GORACEFLAGS }} ./...
-      - name: Collect coverage files
-        id: coverages
-        run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@54bcd8715eee62d40e33596ef5e8f0f48dbbccab # v4.1.0
-        with:
-          files: ${{ steps.coverages.outputs.files }}
-          env_vars: OS=${{ matrix.os }}, GO=${{ steps.go.outputs.version }}
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+      # - name: Collect coverage files
+      #   id: coverages
+      #   run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT
+      # - name: Upload coverage to Codecov
+      #   uses: codecov/codecov-action@54bcd8715eee62d40e33596ef5e8f0f48dbbccab # v4.1.0
+      #   with:
+      #     files: ${{ steps.coverages.outputs.files }}
+      #     env_vars: OS=${{ matrix.os }}, GO=${{ steps.go.outputs.version }}
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     fail_ci_if_error: false
