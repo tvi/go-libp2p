@@ -100,11 +100,13 @@ jobs:
       - name: Run repo-specific setup
         uses: ./.github/actions/go-test-setup
         if: hashFiles('./.github/actions/go-test-setup') != ''
+      - name: Build testing tools
+        run: cd scripts/test_analysis && go build -o gotest2sql github.com/marcopolo/gotest2sql
       - name: Run tests
         if: contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
         uses: protocol/multiple-go-modules@v1.4
         with:
-          run: go test -json ${{ env.GOTESTFLAGS }} ./... | go run github.com/marcopolo/gotest2sql -output ./test_results.db
+          run: go test -json ${{ env.GOTESTFLAGS }} ./... | ./scripts/test_analysis -output ./test_results.db
       - name: Upload test results
         uses: actions/upload-artifact@v3
         with:
