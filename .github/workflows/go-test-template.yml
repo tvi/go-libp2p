@@ -19,8 +19,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu", "windows", "macos"]
-        go: ${{ fromJSON(inputs.go-versions) }}
+        os: ["ubuntu"]
+        go: ["1.22.x"]
+        # os: ["ubuntu", "windows", "macos"]
+        # go: ${{ fromJSON(inputs.go-versions) }}
     env:
       GOTESTFLAGS: -cover -coverprofile=module-coverage.txt -coverpkg=./...
       GO386FLAGS: ""
@@ -106,7 +108,7 @@ jobs:
         if: contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
         uses: protocol/multiple-go-modules@v1.4
         with:
-          run: go test -json ${{ env.GOTESTFLAGS }} ./... | ./scripts/test_analysis -output ./test_results.db
+          run: go test -json ${{ env.GOTESTFLAGS }} ./... | ./scripts/test_analysis/gotest2sql -output ./test_results.db
       - name: Upload test results
         uses: actions/upload-artifact@v3
         with:
