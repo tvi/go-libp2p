@@ -43,6 +43,8 @@ func main() {
 		}
 	}
 
+	// A test failed, so we should exit with a non-zero exit code.
+	os.Exit(1)
 }
 
 func goTestAll(extraFlags []string) error {

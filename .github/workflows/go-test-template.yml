@@ -126,7 +126,7 @@ jobs:
           contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
         uses: protocol/multiple-go-modules@v1.4
         with:
-          run: go test -race ${{ env.GORACEFLAGS }} ./...
+          run: test_analysis -race ${{ env.GORACEFLAGS }} ./...
       # - name: Collect coverage files
       #   id: coverages
       #   run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT
