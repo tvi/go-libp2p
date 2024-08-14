@@ -133,6 +133,8 @@ jobs:
         with:
           name: test_results_race.db
           path: ./test_results.db
+      - name: Adding Link to Test Analysis
+        run: echo '### [Test Report](https://observablehq.com/d/d74435ea5bbf24c7?run-id=${{ env.GITHUB_RUN_ID }})' >> $GITHUB_STEP_SUMMARY
       # - name: Collect coverage files
       #   id: coverages
       #   run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT
