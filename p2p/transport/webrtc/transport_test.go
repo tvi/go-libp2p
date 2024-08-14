@@ -1016,10 +1016,10 @@ func TestConnectionClosedWhenRemoteCloses(t *testing.T) {
 	require.NoError(t, err)
 
 	dialer, _ := getTransport(t)
-	var done sync.Mutex
-	done.Lock()
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		defer done.Unlock()
+		defer wg.Done()
 		c, err := listener.Accept()
 		if !assert.NoError(t, err) {
 			return
@@ -1032,5 +1032,5 @@ func TestConnectionClosedWhenRemoteCloses(t *testing.T) {
 	c, err := dialer.Dial(context.Background(), listener.Multiaddr(), p)
 	require.NoError(t, err)
 	c.Close()
-	done.Lock()
+	wg.Wait()
 }

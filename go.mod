@@ -50,7 +50,7 @@ require (
 	github.com/pion/logging v0.2.2
 	github.com/pion/sctp v1.8.20
 	github.com/pion/stun v0.6.1
-	github.com/pion/webrtc/v3 v3.2.50
+	github.com/pion/webrtc/v3 v3.2.52-0.20240813151442-cef1db8adbf1
 	github.com/prometheus/client_golang v1.19.1
 	github.com/prometheus/client_model v0.6.1
 	github.com/quic-go/quic-go v0.45.2
@@ -130,5 +130,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.3.0 // indirect
 )
-
-replace github.com/pion/webrtc/v3 => github.com/pion/webrtc/v3 v3.2.52-0.20240812164622-d0c92a5c4578

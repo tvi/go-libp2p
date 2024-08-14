@@ -269,6 +269,7 @@ func (t *WebRTCTransport) dial(ctx context.Context, scope network.ConnManagement
 			}
 			if tConn != nil {
 				_ = tConn.Close()
+				tConn = nil
 			}
 		}
 	}()

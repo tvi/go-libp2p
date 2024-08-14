@@ -16,6 +16,7 @@ import (
 
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/pion/datachannel"
+	"github.com/pion/sctp"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -57,8 +58,7 @@ type connection struct {
 	streams      map[uint16]*stream
 	nextStreamID atomic.Int32
 
-	acceptQueue            chan dataChannel
-	peerConnectionClosedCh chan struct{}
+	acceptQueue chan dataChannel
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -173,6 +173,12 @@ func (c *connection) OpenStream(ctx context.Context) (network.MuxedStream, error
 	}
 	rwc, err := c.detachChannel(ctx, dc)
 	if err != nil {
+		// There's a race between webrtc.SCTP.OnClose callback and the underlying
+		// association closing. It's nicer to close the connection here.
+		if errors.Is(err, sctp.ErrStreamClosed) {
+			c.closeWithError(errConnClosed)
+			return nil, c.closeErr
+		}
 		dc.Close()
 		return nil, fmt.Errorf("detach channel failed for stream(%d): %w", streamID, err)
 	}
