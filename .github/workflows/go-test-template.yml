@@ -118,7 +118,8 @@ jobs:
         with:
           name: test_results.db
           path: ./test_results.db
-
+      - name: Remove test results
+        run: rm ./test_results.db
       - name: Run tests with race detector
         # speed things up. Windows and OSX VMs are slow
         if: matrix.os == 'ubuntu' &&
@@ -127,6 +128,11 @@ jobs:
         uses: protocol/multiple-go-modules@v1.4
         with:
           run: test_analysis -race ${{ env.GORACEFLAGS }} ./...
+      - name: Upload test results (Race)
+        uses: actions/upload-artifact@v3
+        with:
+          name: test_results_race.db
+          path: ./test_results.db
       # - name: Collect coverage files
       #   id: coverages
       #   run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT
