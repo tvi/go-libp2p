@@ -141,10 +141,10 @@ jobs:
           fromJSON(steps.config.outputs.json).skipRace != true &&
           contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
         run: |
-          echo "### Tests with race detector failure summary\n" >> $GITHUB_STEP_SUMMARY
+          echo "# Tests with race detector failure summary" >> $GITHUB_STEP_SUMMARY
           test_analysis summarize >> $GITHUB_STEP_SUMMARY
       - name: Adding Link to Run Analysis
-        run: echo "\n### [Test flakiness analysis](https://observablehq.com/d/d74435ea5bbf24c7?run-id=$GITHUB_RUN_ID)" >> $GITHUB_STEP_SUMMARY
+        run: echo "### [Test flakiness analysis](https://observablehq.com/d/d74435ea5bbf24c7?run-id=$GITHUB_RUN_ID)" >> $GITHUB_STEP_SUMMARY
       # - name: Collect coverage files
       #   id: coverages
       #   run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT

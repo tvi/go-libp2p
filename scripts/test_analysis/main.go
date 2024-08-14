@@ -156,7 +156,7 @@ func summarize() (string, error) {
 	if len(testFailures) == 1 {
 		plural = ""
 	}
-	out.WriteString(fmt.Sprintf("# %d Test Failure%s\n\n", len(testFailures), plural))
+	out.WriteString(fmt.Sprintf("## %d Test Failure%s\n\n", len(testFailures), plural))
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
