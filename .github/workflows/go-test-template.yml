@@ -19,10 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu", "macos"]
-        go: ["1.22.x"]
-        # os: ["ubuntu", "windows", "macos"]
-        # go: ${{ fromJSON(inputs.go-versions) }}
+        os: ["ubuntu", "windows", "macos"]
+        go: ${{ fromJSON(inputs.go-versions) }}
     env:
       GOTESTFLAGS: -cover -coverprofile=module-coverage.txt -coverpkg=./...
       GO386FLAGS: ""
