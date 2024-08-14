@@ -101,12 +101,10 @@ jobs:
       - name: Run repo-specific setup
         uses: ./.github/actions/go-test-setup
         if: hashFiles('./.github/actions/go-test-setup') != ''
-      - name: Build testing tools
-        run: cd scripts/test_analysis && go build -o gotest2sql github.com/marcopolo/gotest2sql
-      - name: Build test_analysis
-        run: cd scripts/test_analysis && go build -o test_analysis .
-      - name: Put tools in PATH
-        run: cd scripts/test_analysis && echo $PWD >> $GITHUB_PATH
+      - name: Install testing tools
+        run: cd scripts/test_analysis && go install github.com/marcopolo/gotest2sql
+      - name: Install test_analysis
+        run: cd scripts/test_analysis && go install .
       - name: Run tests
         if: contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
         uses: protocol/multiple-go-modules@v1.4
