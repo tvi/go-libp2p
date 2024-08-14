@@ -129,11 +129,17 @@ jobs:
         with:
           run: test_analysis -race ${{ env.GORACEFLAGS }} ./...
       - name: Upload test results (Race)
+        if: matrix.os == 'ubuntu' &&
+          fromJSON(steps.config.outputs.json).skipRace != true &&
+          contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
         uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.os }}_${{ matrix.go }}_test_results_race.db
           path: ./test_results.db
       - name: Add failure summary
+        if: matrix.os == 'ubuntu' &&
+          fromJSON(steps.config.outputs.json).skipRace != true &&
+          contains(fromJSON(steps.config.outputs.json).skipOSes, matrix.os) == false
         run: |
           echo "### Tests with race detector failure summary\n" >> $GITHUB_STEP_SUMMARY
           test_analysis summarize >> $GITHUB_STEP_SUMMARY
