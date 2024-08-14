@@ -17,4 +17,5 @@ jobs:
   go-check:
     uses: ./.github/workflows/go-check-template.yml
     with:
+      go-version: "1.22.x"
       go-generate-ignore-protoc-version-comments: true
