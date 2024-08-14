@@ -14,7 +14,7 @@ import (
 )
 
 const dbPath = "./test_results.db"
-const retryCount = 4
+const retryCount = 4 // For a total of 5 runs
 
 var coverRegex = regexp.MustCompile(`-cover`)
 
@@ -34,17 +34,28 @@ func main() {
 	}
 
 	log.Printf("Found %d failed tests. Retrying them %d times", len(failedTests), retryCount)
-	for i := 0; i < retryCount; i++ {
-		for _, ft := range failedTests {
+	hasOneNonFlakyFailure := false
+
+	for _, ft := range failedTests {
+		isFlaky := false
+		for i := 0; i < retryCount; i++ {
 			log.Printf("Retrying %s.%s", ft.Package, ft.Test)
 			if err := goTestPkgTest(ft.Package, ft.Test, filterOutFlags(passThruFlags, coverRegex)); err != nil {
 				log.Printf("Failed to run %s.%s: %v", ft.Package, ft.Test, err)
+			} else {
+				isFlaky = true
+				log.Printf("Test %s.%s is flaky.", ft.Package, ft.Test)
 			}
+		}
+		if !isFlaky {
+			hasOneNonFlakyFailure = true
 		}
 	}
 
-	// A test failed, so we should exit with a non-zero exit code.
-	os.Exit(1)
+	// A test consistently failed, so we should exit with a non-zero exit code.
+	if hasOneNonFlakyFailure {
+		os.Exit(1)
+	}
 }
 
 func goTestAll(extraFlags []string) error {
