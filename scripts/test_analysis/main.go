@@ -19,6 +19,7 @@ const retryCount = 4 // For a total of 5 runs
 var coverRegex = regexp.MustCompile(`-cover`)
 
 func main() {
+	log.Printf("Debug: PATH env is %s", os.Getenv("PATH"))
 	passThruFlags := os.Args[1:]
 
 	err := goTestAll(passThruFlags)
