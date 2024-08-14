@@ -116,7 +116,7 @@ jobs:
           path: ./test_results.db
       - name: Add failure summary
         run: |
-          echo "### Failure Summary\n" >> $GITHUB_STEP_SUMMARY
+          echo "### Failure Summary" >> $GITHUB_STEP_SUMMARY
           test_analysis summarize >> $GITHUB_STEP_SUMMARY
       - name: Remove test results
         run: rm ./test_results.db
