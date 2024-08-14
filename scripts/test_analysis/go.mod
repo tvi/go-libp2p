@@ -4,7 +4,7 @@ go 1.22.1
 
 require (
 	github.com/glebarez/go-sqlite v1.22.0
-	github.com/marcopolo/gotest2sql v0.0.0-20240813223106-b91748919e3e
+	github.com/marcopolo/gotest2sql v0.0.0-20240814223546-b02587487904
 )
 
 require (
