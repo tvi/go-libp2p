@@ -115,6 +115,10 @@ jobs:
         with:
           name: ${{ matrix.os }}_${{ matrix.go }}_test_results.db
           path: ./test_results.db
+      - name: Add failure summary
+        run: |
+          echo "### Failure Summary\n" >> $GITHUB_STEP_SUMMARY
+          test_analysis summarize >> $GITHUB_STEP_SUMMARY
       - name: Remove test results
         run: rm ./test_results.db
       - name: Run tests with race detector
@@ -130,8 +134,12 @@ jobs:
         with:
           name: ${{ matrix.os }}_${{ matrix.go }}_test_results_race.db
           path: ./test_results.db
-      - name: Adding Link to Test Analysis
-        run: echo "### [Test Report](https://observablehq.com/d/d74435ea5bbf24c7?run-id=$GITHUB_RUN_ID)" >> $GITHUB_STEP_SUMMARY
+      - name: Add failure summary
+        run: |
+          echo "### Tests with race detector failure summary\n" >> $GITHUB_STEP_SUMMARY
+          test_analysis summarize >> $GITHUB_STEP_SUMMARY
+      - name: Adding Link to Run Analysis
+        run: echo "\n### [Test flakiness analysis](https://observablehq.com/d/d74435ea5bbf24c7?run-id=$GITHUB_RUN_ID)" >> $GITHUB_STEP_SUMMARY
       # - name: Collect coverage files
       #   id: coverages
       #   run: echo "files=$(find . -type f -name 'module-coverage.txt' | tr -s '\n' ',' | sed 's/,$//')" >> $GITHUB_OUTPUT

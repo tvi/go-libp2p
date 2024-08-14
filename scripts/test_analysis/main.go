@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 
 	_ "github.com/glebarez/go-sqlite"
 )
@@ -19,6 +20,17 @@ const retryCount = 4 // For a total of 5 runs
 var coverRegex = regexp.MustCompile(`-cover`)
 
 func main() {
+	if len(os.Args) >= 2 {
+		if os.Args[1] == "summarize" {
+			md, err := summarize()
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Print(md)
+			return
+		}
+	}
+
 	passThruFlags := os.Args[1:]
 
 	err := goTestAll(passThruFlags)
@@ -128,4 +140,66 @@ func filterOutFlags(flags []string, exclude *regexp.Regexp) []string {
 	}
 	fmt.Println(out)
 	return out
+}
+
+// summarize returns a markdown string of the test results.
+func summarize() (string, error) {
+	ctx := context.Background()
+	var out strings.Builder
+
+	testFailures, err := findFailedTests(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	plural := "s"
+	if len(testFailures) == 1 {
+		plural = ""
+	}
+	out.WriteString(fmt.Sprintf("# %d Test Failure%s\n\n", len(testFailures), plural))
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return "", err
+	}
+
+	rows, err := db.QueryContext(ctx, `SELECT
+    tr_output.Package,
+    tr_output.Test,
+    GROUP_CONCAT(tr_output.Output,  x'0a') AS Outputs
+FROM
+    test_results tr_fail
+JOIN
+    test_results tr_output
+ON
+    tr_fail.Test = tr_output.Test
+    AND tr_fail.Package = tr_output.Package
+WHERE
+    tr_fail.Action = 'fail'
+    AND tr_output.Action = 'output'
+	AND tr_output.Test != ''
+GROUP BY
+    tr_output.Package,
+    tr_output.Test
+ORDER BY
+    MIN(tr_output.Time);`)
+	if err != nil {
+		return "", err
+	}
+	for rows.Next() {
+		var pkg, test, outputs string
+		if err := rows.Scan(&pkg, &test, &outputs); err != nil {
+			return "", err
+		}
+		_, err = out.WriteString(fmt.Sprintf(`<details>
+<summary>%s.%s</summary>
+<pre>
+%s
+</pre>
+</details>`, pkg, test, outputs))
+		if err != nil {
+			return "", err
+		}
+	}
+	return out.String(), nil
 }
