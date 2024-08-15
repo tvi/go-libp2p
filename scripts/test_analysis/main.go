@@ -92,7 +92,7 @@ func goTest(extraFlags []string) error {
 	cmd := exec.Command("go", flags...)
 	cmd.Stderr = os.Stderr
 
-	gotest2sql := exec.Command("gotest2sql", "-output", dbPath)
+	gotest2sql := exec.Command("gotest2sql", "-output", dbPath, "-v")
 	gotest2sql.Stdin, _ = cmd.StdoutPipe()
 	gotest2sql.Stderr = os.Stderr
 	err := gotest2sql.Start()

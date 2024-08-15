@@ -101,7 +101,7 @@ jobs:
         uses: ./.github/actions/go-test-setup
         if: hashFiles('./.github/actions/go-test-setup') != ''
       - name: Install testing tools
-        run: cd scripts/test_analysis && go install github.com/marcopolo/gotest2sql
+        run: cd scripts/test_analysis && go install ./cmd/gotest2sql
       - name: Install test_analysis
         run: cd scripts/test_analysis && go install .
       - name: Run tests

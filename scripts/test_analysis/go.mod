@@ -2,10 +2,7 @@ module github.com/libp2p/go-libp2p/scripts/test_analysis
 
 go 1.22.1
 
-require (
-	github.com/glebarez/go-sqlite v1.22.0
-	github.com/marcopolo/gotest2sql v0.0.0-20240814223546-b02587487904
-)
+require github.com/glebarez/go-sqlite v1.22.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
