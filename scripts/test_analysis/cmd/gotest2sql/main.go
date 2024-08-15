@@ -76,7 +76,7 @@ func main() {
 			log.Fatal(err)
 		}
 		if *verbose && ev.Action == "output" {
-			fmt.Println(ev.Output)
+			fmt.Print(ev.Output)
 		}
 
 		_, err = stmt.Exec(
