@@ -406,7 +406,9 @@ func (o *ObservedAddrManager) shouldRecordObservation(conn connMultiaddrs, obser
 }
 
 func (o *ObservedAddrManager) maybeRecordObservation(conn connMultiaddrs, observed ma.Multiaddr) {
+	log.Debugw("maybeRecordObservation for the observed maddr: ", "observed", observed, "connMaddrs", conn)
 	shouldRecord, localTW, observedTW := o.shouldRecordObservation(conn, observed)
+	log.Debugw("maybeRecordObservation: ", "shouldRecord", shouldRecord, "localTW", localTW, "observedTW", observedTW)
 	if !shouldRecord {
 		return
 	}

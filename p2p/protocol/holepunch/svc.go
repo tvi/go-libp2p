@@ -106,6 +106,10 @@ func (s *Service) watchForPublicAddr() {
 	t := time.NewTimer(duration)
 	defer t.Stop()
 	for {
+		log.Debugf("current identify OwnObservedAddrs: %v", s.ids.OwnObservedAddrs())
+		addrs, _ := s.host.Network().InterfaceListenAddresses()
+		log.Debugf("Addrs from InterfaceListenAddresses: %v\n", addrs)
+
 		if containsPublicAddr(s.ids.OwnObservedAddrs()) {
 			log.Debug("Host now has a public address. Starting holepunch protocol.")
 			s.host.SetStreamHandler(Protocol, s.handleNewStream)
