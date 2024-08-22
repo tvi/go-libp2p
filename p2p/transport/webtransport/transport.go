@@ -20,6 +20,7 @@ import (
 	tpt "github.com/libp2p/go-libp2p/core/transport"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/security/noise/pb"
+	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/quicreuse"
 
 	"github.com/benbjohnson/clock"
@@ -426,4 +427,8 @@ func (t *transport) AddCertHashes(m ma.Multiaddr) (ma.Multiaddr, bool) {
 		return m, false
 	}
 	return m.Encapsulate(t.certManager.AddrComponent()), true
+}
+
+func (t *transport) ListenOrder() int {
+	return libp2pquic.ListenOrder + 1 // We want to listen after QUIC listens so we can possibly reuse the same port.
 }
