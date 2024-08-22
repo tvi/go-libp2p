@@ -15,7 +15,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	pool "github.com/libp2p/go-buffer-pool"
 	"github.com/pion/ice/v2"
-	"github.com/pion/stun"
+	"github.com/pion/stun/v3"
 )
 
 var log = logging.Logger("webrtc-udpmux")
