@@ -79,13 +79,12 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			hostname:  f.hostname,
 			createdAt: time.Now(),
 		}
-		b, err := genBearerAuthHeader(a.PrivKey, tok)
+		bearerToken, err := genBearerAuthHeader(a.PrivKey, tok)
 		if err != nil {
 			log.Debugf("failed to generate bearer token: %s", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Authorization", b)
 
 		if base64.URLEncoding.DecodedLen(len(f.challengeServerB64)) >= challengeLen {
 			clientID, err := peer.IDFromPublicKey(f.pubKey)
@@ -108,7 +107,7 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			authInfoVal := fmt.Sprintf("%s peer-id=%s, sig=%s", PeerIDAuthScheme, myId.String(), base64.URLEncoding.EncodeToString(buf))
+			authInfoVal := fmt.Sprintf("%s peer-id=%s, sig=%s %s", PeerIDAuthScheme, myId.String(), base64.URLEncoding.EncodeToString(buf), bearerToken)
 			w.Header().Set("Authentication-Info", authInfoVal)
 		} else {
 			// Only supporting mutual auth for now. Fail because the client didn't want to authenticate us.
@@ -120,12 +119,12 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if a.Next != nil {
 			// Set the token on the request so the next handler can read it
 			authHeader := r.Header.Get("Authorization")
-			if authHeader != "" {
-				authHeader = string(blobB64) + ", " + authHeader
+			if len(authHeader) == 0 {
+				authHeader = PeerIDAuthScheme + " " + bearerToken
 			} else {
-				authHeader = string(blobB64)
+				authHeader = authHeader + ", " + bearerToken
 			}
-			r.Header.Set("Authorization", string(blobB64)+", "+authHeader)
+			r.Header.Set("Authorization", authHeader)
 		}
 	}
 
@@ -135,6 +134,30 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Next.ServeHTTP(w, r)
+}
+
+type peerIDAuthServerState int
+
+const (
+	peerIDAuthServerStateChallengeClient peerIDAuthServerState = iota
+	peerIDAuthServerStateVerify
+	peerIDAuthServerStateDone
+)
+
+type peerIDAuthHandshakeServer struct {
+	serverPrivKey crypto.PrivKey
+	// HMACKey is used to authenticate the opaque blobs and token
+	hmacKey []byte
+
+	state peerIDAuthServerState
+
+	peerID    []byte // the string representation of the peer ID (as bytes)
+	publicKey []byte
+
+	challengeClient []byte
+	challengeServer []byte
+
+	bearerToken []byte
 }
 
 func (a *ServerPeerIDAuth) signChallengeServer(challengeServerB64 string, client peer.ID, hostname string) ([]byte, error) {
@@ -176,14 +199,14 @@ func (a *ServerPeerIDAuth) authenticate(f authFields) (peer.ID, error) {
 }
 
 func (a *ServerPeerIDAuth) UnwrapBearerToken(r *http.Request, expectedHostname string) (peer.ID, error) {
-	if !strings.Contains(r.Header.Get("Authorization"), BearerAuthScheme) {
+	if !strings.Contains(r.Header.Get("Authorization"), PeerIDAuthScheme) {
 		return "", errors.New("missing bearer auth scheme")
 	}
 	schemes, err := parseAuthHeader(r.Header.Get("Authorization"))
 	if err != nil {
 		return "", fmt.Errorf("failed to parse auth header: %w", err)
 	}
-	bearerScheme, ok := schemes[BearerAuthScheme]
+	bearerScheme, ok := schemes[PeerIDAuthScheme]
 	if !ok {
 		return "", fmt.Errorf("missing bearer auth scheme")
 	}
@@ -193,7 +216,7 @@ func (a *ServerPeerIDAuth) UnwrapBearerToken(r *http.Request, expectedHostname s
 func (a *ServerPeerIDAuth) unwrapBearerToken(expectedHostname string, s authScheme) (peer.ID, error) {
 	buf := pool.Get(4096)
 	defer pool.Put(buf)
-	buf, err := b64AppendDecode(buf[:0], []byte(s.bearerToken))
+	buf, err := b64AppendDecode(buf[:0], []byte(s.params["bearer"]))
 	if err != nil {
 		return "", fmt.Errorf("failed to decode bearer token: %w", err)
 	}
@@ -223,13 +246,14 @@ func genBearerAuthHeader(privKey crypto.PrivKey, t bearerToken) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	blobB64 := pool.Get(len(BearerAuthScheme) + 1 + base64.URLEncoding.EncodedLen(len(b)))
+	blobB64 := pool.Get(len(bearerTokenPrefix) + base64.URLEncoding.EncodedLen(len(b)))
 	defer pool.Put(blobB64)
 
 	blobB64 = blobB64[:0]
-	blobB64 = append(blobB64, BearerAuthScheme...)
-	blobB64 = append(blobB64, ' ')
+	blobB64 = append(blobB64, []byte(bearerTokenPrefix)...)
+	blobB64 = append(blobB64, byte('"'))
 	blobB64 = b64AppendEncode(blobB64, b)
+	blobB64 = append(blobB64, byte('"'))
 	return string(blobB64), nil
 }
 
@@ -244,7 +268,7 @@ func genBearerTokenBlob(buf []byte, privKey crypto.PrivKey, t bearerToken) ([]by
 	}
 
 	// Auth scheme prefix
-	buf = append(buf, BearerAuthScheme...)
+	buf = append(buf, []byte(PeerIDAuthScheme+" bearer")...)
 	buf = append(buf, ' ') // Space between auth scheme and the token
 
 	// Peer ID
@@ -272,14 +296,14 @@ func parseBearerTokenBlob(privKey crypto.PrivKey, blob []byte) (bearerToken, err
 	originalSlice := blob
 
 	// Auth scheme prefix +1 for space
-	if len(BearerAuthScheme)+1 > len(blob) {
+	if len(PeerIDAuthScheme+" bearer")+1 > len(blob) {
 		return bearerToken{}, fmt.Errorf("bearer token too short")
 	}
-	hasPrefix := bytes.Equal([]byte(BearerAuthScheme), blob[:len(BearerAuthScheme)])
+	hasPrefix := bytes.Equal([]byte(PeerIDAuthScheme+" bearer"), blob[:len(PeerIDAuthScheme+" bearer")])
 	if !hasPrefix {
 		return bearerToken{}, fmt.Errorf("missing bearer token prefix")
 	}
-	blob = blob[len(BearerAuthScheme):]
+	blob = blob[len(PeerIDAuthScheme+" bearer"):]
 	if blob[0] != ' ' {
 		return bearerToken{}, fmt.Errorf("missing space after auth scheme")
 	}

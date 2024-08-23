@@ -39,7 +39,7 @@ func (a *ClientPeerIDAuth) AddAuthTokenToRequest(req *http.Request) (peer.ID, er
 		return "", ErrNoAuthToken
 	}
 
-	req.Header.Set("Authorization", BearerAuthScheme+" "+t.token)
+	// req.Header.Set("Authorization", BearerAuthScheme+" "+t.token)
 	return t.peerID, nil
 }
 
@@ -64,7 +64,7 @@ func (a *ClientPeerIDAuth) MutualAuth(ctx context.Context, client *http.Client, 
 		return "", fmt.Errorf("failed to authenticate self to server: %w", err)
 	}
 
-	authServerReq, err := http.NewRequestWithContext(ctx, "GET", authEndpoint, nil)
+	authServerReq, err := http.NewRequestWithContext(ctx, "POST", authEndpoint, nil)
 	authServerReq.Host = hostname
 	if err != nil {
 		return "", fmt.Errorf("failed to create request to authenticate server: %w", err)
@@ -92,14 +92,15 @@ func (a *ClientPeerIDAuth) MutualAuth(ctx context.Context, client *http.Client, 
 		return "", fmt.Errorf("failed to parse auth header: %w", err)
 	}
 
-	if bearer, ok := respAuthSchemes[BearerAuthScheme]; ok {
-		a.tokenMapMu.Lock()
-		if a.tokenMap == nil {
-			a.tokenMap = make(map[string]tokenInfo)
-		}
-		a.tokenMap[hostname] = tokenInfo{token: bearer.bearerToken, peerID: serverID}
-		a.tokenMapMu.Unlock()
-	}
+	_ = respAuthSchemes
+	// if bearer, ok := respAuthSchemes[BearerAuthScheme]; ok {
+	// 	a.tokenMapMu.Lock()
+	// 	if a.tokenMap == nil {
+	// 		a.tokenMap = make(map[string]tokenInfo)
+	// 	}
+	// 	a.tokenMap[hostname] = tokenInfo{token: bearer.bearerToken, peerID: serverID}
+	// 	a.tokenMapMu.Unlock()
+	// }
 
 	return serverID, nil
 }
@@ -114,7 +115,7 @@ func (a *ClientPeerIDAuth) sign(challengeClientB64 string, hostname string) ([]b
 // authSelfToServer performs the initial authentication request to the server. It authenticates the client to the server.
 // Returns the Authorization value with libp2p-PeerID scheme to use for subsequent requests.
 func (a *ClientPeerIDAuth) authSelfToServer(ctx context.Context, client *http.Client, myPeerID peer.ID, challengeServer []byte, authEndpoint string, hostname string) (string, error) {
-	r, err := http.NewRequestWithContext(ctx, "GET", authEndpoint, nil)
+	r, err := http.NewRequestWithContext(ctx, "POST", authEndpoint, nil)
 	r.Host = hostname
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)

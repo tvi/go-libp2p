@@ -347,3 +347,32 @@ func TestWalkthroughInSpec(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "btLFqW200aDTQqpkKetJJje7V-iDknXygFqPsfiegNsboXeYDiQ6Rqcpezz1wfr8j9h83QkN9z78cAWzKzV_AQ==", base64.URLEncoding.EncodeToString(sig))
 }
+
+func TestParsePeerIDAuthSchemeParams(t *testing.T) {
+	str := `libp2p-PeerID peer-id="<server-peer-id-string>", sig="<base64-signature-bytes>", public-key="<base64-encoded-public-key-bytes>", bearer="<base64-encoded-opaque-blob>"`
+	paramMap := make(map[string][]byte, 5)
+	expectedParamMap := map[string][]byte{
+		"peer-id":    []byte(`"<server-peer-id-string>"`),
+		"sig":        []byte(`"<base64-signature-bytes>"`),
+		"public-key": []byte(`"<base64-encoded-public-key-bytes>"`),
+		"bearer":     []byte(`"<base64-encoded-opaque-blob>"`),
+	}
+	paramMap, err := parsePeerIDAuthSchemeParams([]byte(str), paramMap)
+	require.NoError(t, err)
+	require.Equal(t, expectedParamMap, paramMap)
+
+}
+
+func BenchmarkParsePeerIDAuthSchemeParams(b *testing.B) {
+	str := []byte(`libp2p-PeerID peer-id="<server-peer-id-string>", sig="<base64-signature-bytes>", public-key="<base64-encoded-public-key-bytes>", bearer="<base64-encoded-opaque-blob>"`)
+	paramMap := make(map[string][]byte, 5)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		paramMap, err := parsePeerIDAuthSchemeParams(str, paramMap)
+		if err != nil {
+			b.Fatal(err)
+		}
+		clear(paramMap)
+	}
+}

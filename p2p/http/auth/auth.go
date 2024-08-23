@@ -1,12 +1,15 @@
 package httppeeridauth
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
@@ -16,12 +19,97 @@ import (
 )
 
 const PeerIDAuthScheme = "libp2p-PeerID"
-const BearerAuthScheme = "libp2p-Bearer"
+
+var PeerIDAuthSchemeBytes = []byte(PeerIDAuthScheme)
+
+const bearerTokenPrefix = "bearer="
 const ProtocolID = "/http-peer-id-auth/1.0.0"
 const serverAuthPrefix = PeerIDAuthScheme + " challenge-client="
 const challengeLen = 32
 
 var log = logging.Logger("httppeeridauth")
+
+func init() {
+	sort.Strings(internedParamKeys)
+}
+
+var internedParamKeys []string = []string{
+	"bearer",
+	"challenge-client",
+	"challenge-server",
+	"opaque",
+	"peer-id",
+	"public-key",
+	"sig",
+}
+
+const maxHeaderValSize = 2048
+
+var errTooBig = errors.New("header value too big")
+var errInvalid = errors.New("invalid header value")
+
+// parsePeerIDAuthSchemeParams parses the parameters of the PeerID auth scheme
+// from the header string. zero alloc if the params map is big enough.
+func parsePeerIDAuthSchemeParams(headerVal []byte, params map[string][]byte) (map[string][]byte, error) {
+	if len(headerVal) > maxHeaderValSize {
+		return nil, errTooBig
+	}
+	startIdx := bytes.Index(headerVal, []byte(PeerIDAuthScheme))
+	if startIdx == -1 {
+		return params, nil
+	}
+
+	headerVal = headerVal[startIdx+len(PeerIDAuthScheme):]
+	advance, token, err := splitAuthHeaderParams(headerVal, true)
+	for ; err == nil; advance, token, err = splitAuthHeaderParams(headerVal, true) {
+		headerVal = headerVal[advance:]
+		bs := token
+		splitAt := bytes.Index(bs, []byte("="))
+		if splitAt == -1 {
+			return nil, errInvalid
+		}
+		kB := bs[:splitAt]
+		v := bs[splitAt+1:]
+		i, ok := sort.Find(len(internedParamKeys), func(i int) int {
+			return bytes.Compare(kB, []byte(internedParamKeys[i]))
+		})
+		var k string
+		if ok {
+			k = internedParamKeys[i]
+		} else {
+			// Not an interned key?
+			k = string(kB)
+		}
+
+		params[k] = v
+	}
+	return params, nil
+}
+
+func splitAuthHeaderParams(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if len(data) == 0 && atEOF {
+		return 0, nil, bufio.ErrFinalToken
+	}
+
+	start := 0
+	for start < len(data) && (data[start] == ' ' || data[start] == ',') {
+		start++
+	}
+	if start == len(data) {
+		return len(data), nil, nil
+	}
+	end := start + 1
+	for end < len(data) && data[end] != ' ' && data[end] != ',' {
+		end++
+	}
+	token = data[start:end]
+	if !bytes.ContainsAny(token, "=") {
+		// This isn't a param. It's likely the next scheme. We're done
+		return len(data), nil, bufio.ErrFinalToken
+	}
+
+	return end, token, nil
+}
 
 type authScheme struct {
 	scheme      string
@@ -35,7 +123,7 @@ const maxParams = 10
 var paramRegexStr = `([\w-]+)=([\w\d-_=.]+|"[^"]+")`
 var paramRegex = regexp.MustCompile(paramRegexStr)
 
-var authHeaderRegex = regexp.MustCompile(fmt.Sprintf(`(%s\s+[^,\s]+)|(%s+\s+(:?(:?%s)(:?\s*,\s*)?)*)`, BearerAuthScheme, PeerIDAuthScheme, paramRegexStr))
+var authHeaderRegex = regexp.MustCompile(fmt.Sprintf(`(%s+\s+(:?(:?%s)(:?\s*,\s*)?)*)`, PeerIDAuthScheme, paramRegexStr))
 
 func parseAuthHeader(headerVal string) (map[string]authScheme, error) {
 	if len(headerVal) > maxAuthHeaderSize {
@@ -59,17 +147,12 @@ func parseAuthHeader(headerVal string) (map[string]authScheme, error) {
 		}
 		scheme := authScheme{scheme: s[:schemeEndIdx]}
 		switch scheme.scheme {
-		case BearerAuthScheme, PeerIDAuthScheme:
+		case PeerIDAuthScheme:
 		default:
 			// Ignore unknown schemes
 			continue
 		}
 		params := s[schemeEndIdx+1:]
-		if scheme.scheme == BearerAuthScheme {
-			scheme.bearerToken = params
-			out = append(out, scheme)
-			continue
-		}
 		scheme.params = make(map[string]string, 10)
 		params = strings.TrimSpace(params)
 		for _, kv := range paramRegex.FindAllStringSubmatch(params, maxParams) {
