@@ -4,12 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
 	logging "github.com/ipfs/go-log/v2"
@@ -29,34 +27,30 @@ const challengeLen = 32
 
 var log = logging.Logger("httppeeridauth")
 
-func init() {
-	sort.Strings(internedParamKeys)
-}
-
-var internedParamKeys []string = []string{
-	"bearer",
-	"challenge-client",
-	"challenge-server",
-	"opaque",
-	"peer-id",
-	"public-key",
-	"sig",
-}
-
 const maxHeaderValSize = 2048
 
 var errTooBig = errors.New("header value too big")
 var errInvalid = errors.New("invalid header value")
 
+// params represent params passed in via headers. All []byte fields to avoid allocations.
+type params struct {
+	bearerTokenB64  []byte
+	challengeClient []byte
+	challengeServer []byte
+	opaqueB64       []byte
+	publicKeyB64    []byte
+	sigB64          []byte
+}
+
 // parsePeerIDAuthSchemeParams parses the parameters of the PeerID auth scheme
-// from the header string. zero alloc if the params map is big enough.
-func parsePeerIDAuthSchemeParams(headerVal []byte, params map[string][]byte) (map[string][]byte, error) {
+// from the header string. zero alloc.
+func (p *params) parsePeerIDAuthSchemeParams(headerVal []byte) error {
 	if len(headerVal) > maxHeaderValSize {
-		return nil, errTooBig
+		return errTooBig
 	}
 	startIdx := bytes.Index(headerVal, []byte(PeerIDAuthScheme))
 	if startIdx == -1 {
-		return params, nil
+		return nil
 	}
 
 	headerVal = headerVal[startIdx+len(PeerIDAuthScheme):]
@@ -66,24 +60,75 @@ func parsePeerIDAuthSchemeParams(headerVal []byte, params map[string][]byte) (ma
 		bs := token
 		splitAt := bytes.Index(bs, []byte("="))
 		if splitAt == -1 {
-			return nil, errInvalid
+			return errInvalid
 		}
 		kB := bs[:splitAt]
 		v := bs[splitAt+1:]
-		i, ok := sort.Find(len(internedParamKeys), func(i int) int {
-			return bytes.Compare(kB, []byte(internedParamKeys[i]))
-		})
-		var k string
-		if ok {
-			k = internedParamKeys[i]
-		} else {
-			// Not an interned key?
-			k = string(kB)
+		if len(v) < 2 || v[0] != '"' || v[len(v)-1] != '"' {
+			return errInvalid
 		}
-
-		params[k] = v
+		v = v[1 : len(v)-1] // drop quotes
+		switch string(kB) {
+		case "bearer":
+			p.bearerTokenB64 = v
+		case "challenge-client":
+			p.challengeClient = v
+		case "challenge-server":
+			p.challengeServer = v
+		case "opaque":
+			p.opaqueB64 = v
+		case "public-key":
+			p.publicKeyB64 = v
+		case "sig":
+			p.sigB64 = v
+		}
 	}
-	return params, nil
+	return nil
+}
+
+type headerBuilder struct {
+	b              strings.Builder
+	pastFirstField bool
+}
+
+func (h *headerBuilder) clear() {
+	h.b.Reset()
+	h.pastFirstField = false
+}
+
+func (h *headerBuilder) writeScheme(scheme string) {
+	h.b.WriteString(scheme)
+	h.b.WriteByte(' ')
+}
+
+func (h *headerBuilder) maybeAddComma() {
+	if !h.pastFirstField {
+		h.pastFirstField = true
+		return
+	}
+	h.b.WriteString(", ")
+}
+
+// writeParam writes a key value pair to the header. It first b64 encodes the value.
+// It uses buf as a scratch space.
+func (h *headerBuilder) writeParamB64(buf []byte, key string, val []byte) {
+	if buf == nil {
+		buf = make([]byte, base64.URLEncoding.EncodedLen(len(val)))
+	}
+	encodedVal := base64.URLEncoding.AppendEncode(buf[:0], val)
+	h.writeParam(key, encodedVal)
+}
+
+// writeParam writes a key value pair to the header. It writes the val as-is.
+func (h *headerBuilder) writeParam(key string, val []byte) {
+	h.maybeAddComma()
+
+	h.b.Grow(len(key) + len(`="`) + len(val) + 1)
+	// Not doing fmt.Fprintf here to avoid one allocation
+	h.b.WriteString(key)
+	h.b.WriteString(`="`)
+	h.b.Write(val)
+	h.b.WriteByte('"')
 }
 
 func splitAuthHeaderParams(data []byte, atEOF bool) (advance int, token []byte, err error) {
@@ -172,45 +217,6 @@ func parseAuthHeader(headerVal string) (map[string]authScheme, error) {
 		outMap[s.scheme] = s
 	}
 	return outMap, nil
-}
-
-func verifySig(publicKey crypto.PubKey, prefix string, signedParts []string, sig []byte) error {
-	b := pool.Get(4096)
-	defer pool.Put(b)
-	buf, err := genDataToSign(b[:0], prefix, signedParts)
-	if err != nil {
-		return fmt.Errorf("failed to generate signed data: %w", err)
-	}
-	ok, err := publicKey.Verify(buf, sig)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("signature verification failed")
-	}
-
-	return nil
-}
-
-func sign(privKey crypto.PrivKey, prefix string, partsToSign []string) ([]byte, error) {
-	b := pool.Get(4096)
-	defer pool.Put(b)
-	buf, err := genDataToSign(b[:0], prefix, partsToSign)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate data to sign: %w", err)
-	}
-	return privKey.Sign(buf)
-}
-
-func genDataToSign(buf []byte, prefix string, parts []string) ([]byte, error) {
-	// Sort the parts in alphabetical order
-	slices.Sort(parts)
-	buf = append(buf, []byte(prefix)...)
-	for _, p := range parts {
-		buf = binary.AppendUvarint(buf, uint64(len(p)))
-		buf = append(buf, p...)
-	}
-	return buf, nil
 }
 
 type authFields struct {
