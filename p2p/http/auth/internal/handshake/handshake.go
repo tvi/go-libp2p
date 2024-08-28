@@ -187,7 +187,7 @@ func genDataToSign(buf []byte, prefix string, parts []sigParam) ([]byte, error) 
 	slices.SortFunc(parts, func(a, b sigParam) int {
 		return strings.Compare(a.k, b.k)
 	})
-	buf = append(buf, []byte(prefix)...)
+	buf = append(buf, prefix...)
 	for _, p := range parts {
 		buf = binary.AppendUvarint(buf, uint64(len(p.k)+1+len(p.v))) // +1 for '='
 		buf = append(buf, p.k...)
