@@ -1,10 +1,10 @@
 package handshake
 
 import (
-	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -79,7 +79,7 @@ func (h *PeerIDAuthHandshakeClient) Run() error {
 		if err != nil {
 			return fmt.Errorf("failed to sign challenge: %w", err)
 		}
-		_, err = rand.Read(h.challengeServer[:])
+		_, err = io.ReadFull(randReader, h.challengeServer[:])
 		if err != nil {
 			return err
 		}
@@ -88,9 +88,9 @@ func (h *PeerIDAuthHandshakeClient) Run() error {
 		h.hb.clear()
 		h.hb.writeScheme(PeerIDAuthScheme)
 		h.hb.writeParamB64(nil, "public-key", clientPubKeyBytes)
-		h.hb.writeParam("opaque", h.p.opaqueB64)
 		h.hb.writeParam("challenge-server", h.challengeServer[:])
 		h.hb.writeParamB64(nil, "sig", clientSig)
+		h.hb.writeParam("opaque", h.p.opaqueB64)
 		return nil
 	case peerIDAuthClientStateVerifyChallenge:
 		serverPubKeyBytes, err := base64.URLEncoding.AppendDecode(nil, h.p.publicKeyB64)

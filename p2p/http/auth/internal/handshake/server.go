@@ -2,12 +2,12 @@ package handshake
 
 import (
 	"crypto/hmac"
-	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"net/http"
 	"time"
 
@@ -26,9 +26,9 @@ const (
 )
 
 type opaqueState struct {
-	IsToken         bool      `json:"is-token"`
-	PeerID          *peer.ID  `json:"peer-id"`
-	ChallengeClient string    `json:"challenge-client"`
+	IsToken         bool      `json:"is-token,omitempty"`
+	PeerID          peer.ID   `json:"peer-id,omitempty"`
+	ChallengeClient string    `json:"challenge-client,omitempty"`
 	Hostname        string    `json:"hostname"`
 	CreatedTime     time.Time `json:"created-time"`
 }
@@ -132,7 +132,7 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 	case peerIDAuthServerStateChallengeClient:
 		h.hb.writeScheme(PeerIDAuthScheme)
 		{
-			_, err := rand.Read(h.buf[:challengeLen])
+			_, err := io.ReadFull(randReader, h.buf[:challengeLen])
 			if err != nil {
 				return err
 			}
@@ -140,7 +140,7 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 			h.opaque = opaqueState{
 				ChallengeClient: string(encodedChallenge),
 				Hostname:        h.Hostname,
-				CreatedTime:     time.Now(),
+				CreatedTime:     nowFn(),
 			}
 			h.hb.writeParam("challenge-client", encodedChallenge)
 		}
@@ -162,7 +162,7 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 				return err
 			}
 		}
-		if time.Now().After(h.opaque.CreatedTime.Add(challengeTTL)) {
+		if nowFn().After(h.opaque.CreatedTime.Add(challengeTTL)) {
 			return errExpiredChallenge
 		}
 		if h.opaque.IsToken {
@@ -221,9 +221,9 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 		// And create a bearer token for the client
 		h.opaque = opaqueState{
 			IsToken:     true,
-			PeerID:      &peerID,
+			PeerID:      peerID,
 			Hostname:    h.Hostname,
-			CreatedTime: time.Now(),
+			CreatedTime: nowFn(),
 		}
 		serverPubKey := h.PrivKey.GetPublic()
 		pubKeyBytes, err := crypto.MarshalPublicKey(serverPubKey)
@@ -256,7 +256,7 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 			return errors.New("expected token, got challenge")
 		}
 
-		if time.Now().After(h.opaque.CreatedTime.Add(h.TokenTTL)) {
+		if nowFn().After(h.opaque.CreatedTime.Add(h.TokenTTL)) {
 			return errExpiredToken
 		}
 
@@ -277,7 +277,7 @@ func (h *PeerIDAuthHandshakeServer) PeerID() (peer.ID, error) {
 	default:
 		return "", errors.New("not in proper state")
 	}
-	return *h.opaque.PeerID, nil
+	return h.opaque.PeerID, nil
 }
 
 func (h *PeerIDAuthHandshakeServer) SetHeader(hdr http.Header) {

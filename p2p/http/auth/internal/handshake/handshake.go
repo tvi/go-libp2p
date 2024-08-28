@@ -3,12 +3,14 @@ package handshake
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 
@@ -24,6 +26,9 @@ var peerIDAuthSchemeBytes = []byte(PeerIDAuthScheme)
 var errTooBig = errors.New("header value too big")
 var errInvalid = errors.New("invalid header value")
 var errNotRan = errors.New("not ran. call Run() first")
+
+var randReader = rand.Reader // A var so it can be changed in tests
+var nowFn = time.Now         // A var so it can be changed in tests
 
 // params represent params passed in via headers. All []byte fields to avoid allocations.
 type params struct {
