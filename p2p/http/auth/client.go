@@ -23,9 +23,10 @@ type tokenInfo struct {
 }
 
 // AuthenticatedDo is like http.Client.Do, but it does the libp2p peer ID auth handshake if needed.
-func (a *ClientPeerIDAuth) AuthenticatedDo(client *http.Client, req *http.Request) (peer.ID, *http.Response, error) {
-	clonedReq := req.Clone(req.Context())
-
+// Takes in a function that creates a new request, so that we can retry the
+// request if we need to authenticate.
+func (a *ClientPeerIDAuth) AuthenticatedDo(client *http.Client, newRequest func() *http.Request) (peer.ID, *http.Response, error) {
+	req := newRequest()
 	hostname := req.Host
 	a.tokenMapMu.Lock()
 	if a.tokenMap == nil {
@@ -59,9 +60,11 @@ func (a *ClientPeerIDAuth) AuthenticatedDo(client *http.Client, req *http.Reques
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to run handshake: %w", err)
 	}
-	handshake.SetHeader(clonedReq.Header)
 
-	resp, err = client.Do(clonedReq)
+	req = newRequest()
+	handshake.SetHeader(req.Header)
+
+	resp, err = client.Do(req)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to do authenticated request: %w", err)
 	}

@@ -108,21 +108,30 @@ func TestMutualAuth(t *testing.T) {
 				expectedServerID, err := peer.IDFromPrivateKey(serverKey)
 				require.NoError(t, err)
 
-				req, err := http.NewRequest("POST", ts.URL, nil)
-				require.NoError(t, err)
-				req.Host = "example.com"
-				serverID, resp, err := clientAuth.AuthenticatedDo(client, req)
+				newReq := func() *http.Request {
+					req, err := http.NewRequest("POST", ts.URL, nil)
+					require.NoError(t, err)
+					req.Host = "example.com"
+					return req
+				}
+				serverID, resp, err := clientAuth.AuthenticatedDo(client, newReq)
 				require.NoError(t, err)
 				require.Equal(t, expectedServerID, serverID)
 				require.NotZero(t, clientAuth.tokenMap["example.com"])
 				require.Equal(t, http.StatusOK, resp.StatusCode)
 
 				// Once more with the auth token
-				req, err = http.NewRequest("POST", ts.URL, nil)
+				req, err := http.NewRequest("POST", ts.URL, nil)
 				require.NoError(t, err)
 				req.Host = "example.com"
-				serverID, resp, err = clientAuth.AuthenticatedDo(client, req)
+				timesCalled := 0
+				newReq = func() *http.Request {
+					timesCalled++
+					return req
+				}
+				serverID, resp, err = clientAuth.AuthenticatedDo(client, newReq)
 				require.NotEmpty(t, req.Header.Get("Authorization"))
+				require.Equal(t, 1, timesCalled, "should only call newRequest once since we have a token")
 				require.NoError(t, err)
 				require.Equal(t, expectedServerID, serverID)
 				require.NotZero(t, clientAuth.tokenMap["example.com"])
@@ -131,12 +140,3 @@ func TestMutualAuth(t *testing.T) {
 		}
 	}
 }
-
-// // Test Vectors
-// var zeroBytes = make([]byte, 64)
-// var zeroKey, _, _ = crypto.GenerateEd25519Key(bytes.NewReader(zeroBytes))
-
-// // Peer ID derived from the zero key
-// var zeroID, _ = peer.IDFromPublicKey(zeroKey.GetPublic())
-
-// TODO add generator for specs table & example
