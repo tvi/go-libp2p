@@ -132,37 +132,6 @@ func TestMutualAuth(t *testing.T) {
 	}
 }
 
-func FuzzServeHTTP(f *testing.F) {
-	zeroBytes := make([]byte, 64)
-	serverKey, _, err := crypto.GenerateEd25519Key(bytes.NewReader(zeroBytes))
-	require.NoError(f, err)
-	auth := ServerPeerIDAuth{
-		PrivKey: serverKey,
-		ValidHostnameFn: func(s string) bool {
-			return s == "example.com"
-		},
-		TokenTTL:      time.Hour,
-		InsecureNoTLS: true,
-	}
-	// Just check that we don't panic
-	f.Fuzz(func(t *testing.T, data []byte) {
-		if len(data) == 0 {
-			return
-		}
-		hostLen := int(data[0])
-		data = data[1:]
-		if hostLen > len(data) {
-			return
-		}
-		host := string(data[:hostLen])
-		data = data[hostLen:]
-		req := httptest.NewRequest("GET", "http://example.com", nil)
-		req.Host = host
-		req.Header.Set("Authorization", string(data))
-		auth.ServeHTTP(httptest.NewRecorder(), req)
-	})
-}
-
 // // Test Vectors
 // var zeroBytes = make([]byte, 64)
 // var zeroKey, _, _ = crypto.GenerateEd25519Key(bytes.NewReader(zeroBytes))

@@ -4,7 +4,6 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"errors"
 	"hash"
 	"net/http"
 	"sync"
@@ -27,8 +26,6 @@ type ServerPeerIDAuth struct {
 	Hmac     hash.Hash
 	initHmac sync.Once
 }
-
-var errMissingAuthHeader = errors.New("missing header")
 
 // ServeHTTP implements the http.Handler interface for PeerIDAuth. It will
 // attempt to authenticate the request using using the libp2p peer ID auth

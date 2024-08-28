@@ -22,11 +22,6 @@ type tokenInfo struct {
 	peerID peer.ID
 }
 
-// AddAuthTokenToRequest adds the libp2p-Bearer token to the request. Returns the peer ID of the server.
-func (a *ClientPeerIDAuth) AddAuthTokenToRequest(req *http.Request) (peer.ID, error) {
-	panic("todo")
-}
-
 // AuthenticatedDo is like http.Client.Do, but it does the libp2p peer ID auth handshake if needed.
 func (a *ClientPeerIDAuth) AuthenticatedDo(client *http.Client, req *http.Request) (peer.ID, *http.Response, error) {
 	clonedReq := req.Clone(req.Context())
@@ -92,5 +87,4 @@ func (a *ClientPeerIDAuth) AuthenticatedDo(client *http.Client, req *http.Reques
 	a.tokenMapMu.Unlock()
 
 	return serverPeerID, resp, nil
-
 }
