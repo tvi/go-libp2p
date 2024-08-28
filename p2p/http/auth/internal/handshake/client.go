@@ -149,3 +149,12 @@ func (h *PeerIDAuthHandshakeClient) SetHeader(hdr http.Header) {
 	}
 	hdr.Set("Authorization", h.hb.b.String())
 }
+
+// BearerToken returns the server given bearer token for the client. Set this on
+// the Authorization header in the client's request.
+func (h *PeerIDAuthHandshakeClient) BearerToken() string {
+	if h.state != peerIDAuthClientStateDone {
+		return ""
+	}
+	return h.hb.b.String()
+}

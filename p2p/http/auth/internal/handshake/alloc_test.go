@@ -1,6 +1,6 @@
 //go:build nocover
 
-package httppeeridauth
+package handshake
 
 import "testing"
 

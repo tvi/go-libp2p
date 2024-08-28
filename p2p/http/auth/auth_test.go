@@ -3,7 +3,7 @@ package httppeeridauth
 import (
 	"bytes"
 	"crypto/rand"
-	"encoding/hex"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -59,10 +59,12 @@ func TestMutualAuth(t *testing.T) {
 			serverGen: func(t *testing.T) (*httptest.Server, *ServerPeerIDAuth) {
 				t.Helper()
 				auth := ServerPeerIDAuth{
-					PrivKey:        serverKey,
-					ValidHostnames: map[string]struct{}{"example.com": {}},
-					TokenTTL:       time.Hour,
-					InsecureNoTLS:  true,
+					PrivKey: serverKey,
+					ValidHostnameFn: func(s string) bool {
+						return s == "example.com"
+					},
+					TokenTTL:      time.Hour,
+					InsecureNoTLS: true,
 				}
 
 				ts := httptest.NewServer(&auth)
@@ -75,9 +77,11 @@ func TestMutualAuth(t *testing.T) {
 			serverGen: func(t *testing.T) (*httptest.Server, *ServerPeerIDAuth) {
 				t.Helper()
 				auth := ServerPeerIDAuth{
-					PrivKey:        serverKey,
-					ValidHostnames: map[string]struct{}{"example.com": {}},
-					TokenTTL:       time.Hour,
+					PrivKey: serverKey,
+					ValidHostnameFn: func(s string) bool {
+						return s == "example.com"
+					},
+					TokenTTL: time.Hour,
 				}
 
 				ts := httptest.NewTLSServer(&auth)
@@ -90,46 +94,39 @@ func TestMutualAuth(t *testing.T) {
 	for _, ctc := range clientTestCases {
 		for _, stc := range serverTestCases {
 			t.Run(ctc.name+"+"+stc.name, func(t *testing.T) {
-				// ts, serverAuth := stc.serverGen(t)
-				// client := ts.Client()
-				// tlsClientConfig := client.Transport.(*http.Transport).TLSClientConfig
-				// if tlsClientConfig != nil {
-				// 	// If we're using TLS, we need to set the SNI so that the
-				// 	// server can verify the request Host matches it.
-				// 	tlsClientConfig.ServerName = "example.com"
-				// }
-				// clientKey := ctc.clientKeyGen(t)
-				// clientAuth := ClientPeerIDAuth{PrivKey: clientKey}
+				ts, _ := stc.serverGen(t)
+				client := ts.Client()
+				tlsClientConfig := client.Transport.(*http.Transport).TLSClientConfig
+				if tlsClientConfig != nil {
+					// If we're using TLS, we need to set the SNI so that the
+					// server can verify the request Host matches it.
+					tlsClientConfig.ServerName = "example.com"
+				}
+				clientKey := ctc.clientKeyGen(t)
+				clientAuth := ClientPeerIDAuth{PrivKey: clientKey}
 
-				// expectedServerID, err := peer.IDFromPrivateKey(serverKey)
-				// require.NoError(t, err)
+				expectedServerID, err := peer.IDFromPrivateKey(serverKey)
+				require.NoError(t, err)
 
-				// ctx := context.Background()
-				// serverID, err := clientAuth.MutualAuth(ctx, client, ts.URL, "example.com")
-				// require.NoError(t, err)
-				// require.Equal(t, expectedServerID, serverID)
-				// require.NotZero(t, clientAuth.tokenMap["example.com"])
+				req, err := http.NewRequest("POST", ts.URL, nil)
+				require.NoError(t, err)
+				req.Host = "example.com"
+				serverID, resp, err := clientAuth.AuthenticatedDo(client, req)
+				require.NoError(t, err)
+				require.Equal(t, expectedServerID, serverID)
+				require.NotZero(t, clientAuth.tokenMap["example.com"])
+				require.Equal(t, http.StatusOK, resp.StatusCode)
 
-				// // Once more with the auth token
-				// req, err := http.NewRequest("GET", ts.URL, nil)
-				// require.NoError(t, err)
-				// req.Host = "example.com"
-				// serverID, err = clientAuth.AddAuthTokenToRequest(req)
-				// require.NoError(t, err)
-				// require.Equal(t, expectedServerID, serverID)
-
-				// // Verify that unwrapping our token gives us the client's peer ID
-				// expectedClientPeerID, err := peer.IDFromPrivateKey(clientKey)
-				// require.NoError(t, err)
-				// clientPeerID, err := serverAuth.UnwrapBearerToken(req, req.Host)
-				// require.NoError(t, err)
-				// require.Equal(t, expectedClientPeerID, clientPeerID)
-
-				// // Verify that we can make an authenticated request
-				// resp, err := client.Do(req)
-				// require.NoError(t, err)
-
-				// require.Equal(t, http.StatusOK, resp.StatusCode)
+				// Once more with the auth token
+				req, err = http.NewRequest("POST", ts.URL, nil)
+				require.NoError(t, err)
+				req.Host = "example.com"
+				serverID, resp, err = clientAuth.AuthenticatedDo(client, req)
+				require.NotEmpty(t, req.Header.Get("Authorization"))
+				require.NoError(t, err)
+				require.Equal(t, expectedServerID, serverID)
+				require.NotZero(t, clientAuth.tokenMap["example.com"])
+				require.Equal(t, http.StatusOK, resp.StatusCode)
 			})
 		}
 	}
@@ -140,12 +137,14 @@ func FuzzServeHTTP(f *testing.F) {
 	serverKey, _, err := crypto.GenerateEd25519Key(bytes.NewReader(zeroBytes))
 	require.NoError(f, err)
 	auth := ServerPeerIDAuth{
-		PrivKey:        serverKey,
-		ValidHostnames: map[string]struct{}{"example.com": {}},
-		TokenTTL:       time.Hour,
-		InsecureNoTLS:  true,
+		PrivKey: serverKey,
+		ValidHostnameFn: func(s string) bool {
+			return s == "example.com"
+		},
+		TokenTTL:      time.Hour,
+		InsecureNoTLS: true,
 	}
-	// Just check that we don't panic'
+	// Just check that we don't panic
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) == 0 {
 			return
@@ -164,19 +163,11 @@ func FuzzServeHTTP(f *testing.F) {
 	})
 }
 
-// Test Vectors
-var zeroBytes = make([]byte, 64)
-var zeroKey, _, _ = crypto.GenerateEd25519Key(bytes.NewReader(zeroBytes))
+// // Test Vectors
+// var zeroBytes = make([]byte, 64)
+// var zeroKey, _, _ = crypto.GenerateEd25519Key(bytes.NewReader(zeroBytes))
 
-// Peer ID derived from the zero key
-var zeroID, _ = peer.IDFromPublicKey(zeroKey.GetPublic())
+// // Peer ID derived from the zero key
+// var zeroID, _ = peer.IDFromPublicKey(zeroKey.GetPublic())
 
-func genClientID(t *testing.T) (peer.ID, crypto.PrivKey) {
-	clientPrivStr, err := hex.DecodeString("080112407e0830617c4a7de83925dfb2694556b12936c477a0e1feb2e148ec9da60fee7d1ed1e8fae2c4a144b8be8fd4b47bf3d3b34b871c3cacf6010f0e42d474fce27e")
-	require.NoError(t, err)
-	clientKey, err := crypto.UnmarshalPrivateKey(clientPrivStr)
-	require.NoError(t, err)
-	clientID, err := peer.IDFromPrivateKey(clientKey)
-	require.NoError(t, err)
-	return clientID, clientKey
-}
+// TODO add generator for specs table & example
