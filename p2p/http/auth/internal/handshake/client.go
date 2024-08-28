@@ -69,6 +69,9 @@ func (h *PeerIDAuthHandshakeClient) Run() error {
 	}
 	switch h.state {
 	case peerIDAuthClientStateSignChallenge:
+		if len(h.p.challengeClient) < challengeLen {
+			return errors.New("challenge too short")
+		}
 		clientSig, err := sign(h.PrivKey, PeerIDAuthScheme, []sigParam{
 			{"challenge-client", h.p.challengeClient},
 			{"hostname", []byte(h.Hostname)},

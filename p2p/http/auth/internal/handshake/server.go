@@ -200,6 +200,9 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 			}
 		}
 
+		if len(h.p.challengeServer) < challengeLen {
+			return errors.New("challenge too short")
+		}
 		// We authenticated the client, now authenticate ourselves
 		serverSig, err := sign(h.PrivKey, PeerIDAuthScheme, []sigParam{
 			{"challenge-server", h.p.challengeServer},
