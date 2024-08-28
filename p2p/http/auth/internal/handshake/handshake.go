@@ -41,7 +41,7 @@ func (p *params) parsePeerIDAuthSchemeParams(headerVal []byte) error {
 	if len(headerVal) > maxHeaderSize {
 		return errTooBig
 	}
-	startIdx := bytes.Index(headerVal, []byte(PeerIDAuthScheme))
+	startIdx := bytes.Index(headerVal, peerIDAuthSchemeBytes)
 	if startIdx == -1 {
 		return nil
 	}
