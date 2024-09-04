@@ -19,6 +19,8 @@ import (
 	manet "github.com/multiformats/go-multiaddr/net"
 )
 
+const maxTCPSimOpenRetries = 3
+
 // dialRequest is structure used to request dials to the peer associated with a
 // worker loop
 type dialRequest struct {
@@ -71,7 +73,7 @@ type addrDial struct {
 	dialRankingDelay time.Duration
 	// expectedTCPUpgradeTime is the expected time by which security upgrade will complete
 	expectedTCPUpgradeTime time.Time
-	retried                bool
+	retryCount             uint8
 }
 
 // dialWorker synchronises concurrent dials to a peer. It ensures that we make at most one dial to a
@@ -384,21 +386,21 @@ loop:
 				log.Errorf("SWARM BUG: unexpected ErrDialRefusedBlackHole while dialing peer %s to addr %s",
 					w.peer, res.Addr)
 			case res.Err == context.Canceled:
-			case !ad.retried && errors.Is(res.Err, sec.ErrSimOpen):
+			case ad.retryCount < maxTCPSimOpenRetries && errors.Is(res.Err, sec.ErrSimOpen):
 				now := time.Now()
 				// these are new addresses, track them and add them to dq
 				w.trackedDials[string(ad.addr.Bytes())] = &addrDial{
-					addr:      ad.addr,
-					ctx:       ad.ctx,
-					createdAt: now,
-					retried:   true,
+					addr:       ad.addr,
+					ctx:        ad.ctx,
+					createdAt:  now,
+					retryCount: ad.retryCount + 1,
 				}
 				// This is an error due to simultaneous open. Let the "smaller"
 				// peer try again first, otherwise we'll try again after a delay
 				var delay time.Duration
 				if strings.Compare(string(w.peer), string(w.s.LocalPeer())) == -1 {
 					// Random delay to avoid the other side being able to predict when we'll try again
-					delay = 50*time.Millisecond + time.Duration(rand.Intn(100))*time.Millisecond
+					delay = time.Duration((50+rand.Intn(100))<<int(ad.retryCount)) * time.Millisecond
 				}
 				dq.UpdateOrAdd(network.AddrDelay{Addr: ad.addr, Delay: delay, ForceDelay: true})
 				scheduleNextDial()
