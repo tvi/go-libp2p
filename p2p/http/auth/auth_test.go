@@ -63,8 +63,8 @@ func TestMutualAuth(t *testing.T) {
 					ValidHostnameFn: func(s string) bool {
 						return s == "example.com"
 					},
-					TokenTTL:      time.Hour,
-					InsecureNoTLS: true,
+					TokenTTL: time.Hour,
+					NoTLS:    true,
 				}
 
 				ts := httptest.NewServer(&auth)

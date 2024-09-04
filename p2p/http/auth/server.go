@@ -18,10 +18,12 @@ type ServerPeerIDAuth struct {
 	PrivKey  crypto.PrivKey
 	TokenTTL time.Duration
 	Next     func(peer peer.ID, w http.ResponseWriter, r *http.Request)
-	// InsecureNoTLS is a flag that allows the server to accept requests without a TLS ServerName. Used only for testing.
-	InsecureNoTLS bool
-	// Only used when InsecureNoTLS is true. If set, the server will only accept requests for the hostnames which return true
-	ValidHostnameFn func(string) bool
+	// NoTLS is a flag that allows the server to accept requests without a TLS
+	// ServerName. Used when something else is terminating the TLS connection.
+	NoTLS bool
+	// Required when NoTLS is true. The server will only accept requests for
+	// which the Host header returns true.
+	ValidHostnameFn func(hostname string) bool
 
 	Hmac     hash.Hash
 	initHmac sync.Once
@@ -44,9 +46,9 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 
 	hostname := r.Host
-	if a.InsecureNoTLS {
+	if a.NoTLS {
 		if a.ValidHostnameFn == nil {
-			log.Debugf("No ValidHostnameFn set for InsecureNoTLS")
+			log.Error("No ValidHostnameFn set. Required for NoTLS")
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -57,7 +59,7 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		if r.TLS == nil {
-			log.Debugf("No TLS connection, and InsecureNoTLS is false")
+			log.Warn("No TLS connection, and NoTLS is false")
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
