@@ -2,9 +2,15 @@ package httppeeridauth
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/tls"
+	"hash"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,9 +100,16 @@ func TestMutualAuth(t *testing.T) {
 	for _, ctc := range clientTestCases {
 		for _, stc := range serverTestCases {
 			t.Run(ctc.name+"+"+stc.name, func(t *testing.T) {
-				ts, _ := stc.serverGen(t)
+				ts, server := stc.serverGen(t)
 				client := ts.Client()
-				tlsClientConfig := client.Transport.(*http.Transport).TLSClientConfig
+				roundTripper := instrumentedRoundTripper{client.Transport, 0}
+				client.Transport = &roundTripper
+				requestsSent := func() int {
+					defer func() { roundTripper.timesRoundtripped = 0 }()
+					return roundTripper.timesRoundtripped
+				}
+
+				tlsClientConfig := roundTripper.TLSClientConfig()
 				if tlsClientConfig != nil {
 					// If we're using TLS, we need to set the SNI so that the
 					// server can verify the request Host matches it.
@@ -108,35 +121,93 @@ func TestMutualAuth(t *testing.T) {
 				expectedServerID, err := peer.IDFromPrivateKey(serverKey)
 				require.NoError(t, err)
 
-				newReq := func() *http.Request {
-					req, err := http.NewRequest("POST", ts.URL, nil)
-					require.NoError(t, err)
-					req.Host = "example.com"
-					return req
-				}
-				serverID, resp, err := clientAuth.AuthenticatedDo(client, newReq)
-				require.NoError(t, err)
-				require.Equal(t, expectedServerID, serverID)
-				require.NotZero(t, clientAuth.tokenMap["example.com"])
-				require.Equal(t, http.StatusOK, resp.StatusCode)
-
-				// Once more with the auth token
 				req, err := http.NewRequest("POST", ts.URL, nil)
 				require.NoError(t, err)
 				req.Host = "example.com"
-				timesCalled := 0
-				newReq = func() *http.Request {
-					timesCalled++
-					return req
-				}
-				serverID, resp, err = clientAuth.AuthenticatedDo(client, newReq)
-				require.NotEmpty(t, req.Header.Get("Authorization"))
-				require.Equal(t, 1, timesCalled, "should only call newRequest once since we have a token")
+				serverID, resp, err := clientAuth.AuthenticatedDo(client, req)
 				require.NoError(t, err)
 				require.Equal(t, expectedServerID, serverID)
 				require.NotZero(t, clientAuth.tokenMap["example.com"])
 				require.Equal(t, http.StatusOK, resp.StatusCode)
+				require.Equal(t, 2, requestsSent())
+
+				// Once more with the auth token
+				req, err = http.NewRequest("POST", ts.URL, nil)
+				require.NoError(t, err)
+				req.Host = "example.com"
+				serverID, resp, err = clientAuth.AuthenticatedDo(client, req)
+				require.NotEmpty(t, req.Header.Get("Authorization"))
+				require.NoError(t, err)
+				require.Equal(t, expectedServerID, serverID)
+				require.NotZero(t, clientAuth.tokenMap["example.com"])
+				require.Equal(t, http.StatusOK, resp.StatusCode)
+				require.Equal(t, 1, requestsSent(), "should only call newRequest once since we have a token")
+
+				t.Run("Tokens Expired", func(t *testing.T) {
+					// Clear the auth token on the server side
+					server.TokenTTL = 1 // Small TTL
+					time.Sleep(100 * time.Millisecond)
+					resetServerTokenTTL := sync.OnceFunc(func() {
+						server.TokenTTL = time.Hour
+					})
+
+					req, err := http.NewRequest("POST", ts.URL, nil)
+					require.NoError(t, err)
+					req.Host = "example.com"
+					req.GetBody = func() (io.ReadCloser, error) {
+						resetServerTokenTTL()
+						return nil, nil
+					}
+					serverID, resp, err = clientAuth.AuthenticatedDo(client, req)
+					require.NoError(t, err)
+					require.NotEmpty(t, req.Header.Get("Authorization"))
+					require.Equal(t, http.StatusOK, resp.StatusCode)
+					require.Equal(t, expectedServerID, serverID)
+					require.NotZero(t, clientAuth.tokenMap["example.com"])
+					require.Equal(t, 3, requestsSent(), "should call newRequest 3x since our token expired")
+				})
+
+				t.Run("Tokens Invalidated", func(t *testing.T) {
+					// Clear the auth token on the server side
+					server.Hmac = func() hash.Hash {
+						key := make([]byte, 32)
+						_, err := rand.Read(key)
+						if err != nil {
+							panic(err)
+						}
+						return hmac.New(sha256.New, key)
+					}()
+
+					req, err := http.NewRequest("POST", ts.URL, nil)
+					req.GetBody = func() (io.ReadCloser, error) {
+						return nil, nil
+					}
+					require.NoError(t, err)
+					req.Host = "example.com"
+					serverID, resp, err = clientAuth.AuthenticatedDo(client, req)
+					require.NoError(t, err)
+					require.NotEmpty(t, req.Header.Get("Authorization"))
+					require.Equal(t, http.StatusOK, resp.StatusCode)
+					require.Equal(t, expectedServerID, serverID)
+					require.NotZero(t, clientAuth.tokenMap["example.com"])
+					require.Equal(t, 3, requestsSent(), "should call newRequest 3x since our token expired")
+				})
+
 			})
 		}
 	}
+}
+
+type instrumentedRoundTripper struct {
+	http.RoundTripper
+	timesRoundtripped int
+}
+
+func (irt *instrumentedRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	irt.timesRoundtripped++
+	return irt.RoundTripper.RoundTrip(req)
+}
+
+func (irt *instrumentedRoundTripper) TLSClientConfig() *tls.Config {
+	return irt.RoundTripper.(*http.Transport).TLSClientConfig
 }

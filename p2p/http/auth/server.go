@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"hash"
 	"net/http"
 	"sync"
@@ -70,27 +71,45 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	handshake := handshake.PeerIDAuthHandshakeServer{
+	hs := handshake.PeerIDAuthHandshakeServer{
 		Hostname: hostname,
 		PrivKey:  a.PrivKey,
 		TokenTTL: a.TokenTTL,
 		Hmac:     a.Hmac,
 	}
-	err := handshake.ParseHeaderVal([]byte(r.Header.Get("Authorization")))
+	err := hs.ParseHeaderVal([]byte(r.Header.Get("Authorization")))
 	if err != nil {
 		log.Debugf("Failed to parse header: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	err = handshake.Run()
+	err = hs.Run()
 	if err != nil {
+		switch {
+		case errors.Is(err, handshake.ErrInvalidHMAC),
+			errors.Is(err, handshake.ErrExpiredChallenge),
+			errors.Is(err, handshake.ErrExpiredToken):
+
+			hs := handshake.PeerIDAuthHandshakeServer{
+				Hostname: hostname,
+				PrivKey:  a.PrivKey,
+				TokenTTL: a.TokenTTL,
+				Hmac:     a.Hmac,
+			}
+			hs.Run()
+			hs.SetHeader(w.Header())
+			w.WriteHeader(http.StatusUnauthorized)
+
+			return
+		}
+
 		log.Debugf("Failed to run handshake: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	handshake.SetHeader(w.Header())
+	hs.SetHeader(w.Header())
 
-	peer, err := handshake.PeerID()
+	peer, err := hs.PeerID()
 	if err != nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
