@@ -15,6 +15,12 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+var (
+	ErrExpiredChallenge = errors.New("challenge expired")
+	ErrExpiredToken     = errors.New("token expired")
+	ErrInvalidHMAC      = errors.New("invalid HMAC")
+)
+
 const challengeTTL = 5 * time.Minute
 
 type peerIDAuthServerState int
@@ -54,12 +60,10 @@ func (o *opaqueState) Marshal(hmac hash.Hash, b []byte) ([]byte, error) {
 	return b, nil
 }
 
-var errInvalidHMAC = errors.New("invalid HMAC")
-
 func (o *opaqueState) Unmarshal(hmacImpl hash.Hash, d []byte) error {
 	hmacImpl.Reset()
 	if len(d) < hmacImpl.Size() {
-		return errInvalidHMAC
+		return ErrInvalidHMAC
 	}
 	hmacVal := d[:hmacImpl.Size()]
 	fields := d[hmacImpl.Size():]
@@ -69,7 +73,7 @@ func (o *opaqueState) Unmarshal(hmacImpl hash.Hash, d []byte) error {
 	}
 	expectedHmac := hmacImpl.Sum(nil)
 	if !hmac.Equal(hmacVal, expectedHmac) {
-		return errInvalidHMAC
+		return ErrInvalidHMAC
 	}
 
 	err = json.Unmarshal(fields, &o)
@@ -132,9 +136,6 @@ func (h *PeerIDAuthHandshakeServer) ParseHeaderVal(headerVal []byte) error {
 	return nil
 }
 
-var errExpiredChallenge = errors.New("challenge expired")
-var errExpiredToken = errors.New("token expired")
-
 func (h *PeerIDAuthHandshakeServer) Run() error {
 	h.ran = true
 	switch h.state {
@@ -181,7 +182,7 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 			}
 		}
 		if nowFn().After(h.opaque.CreatedTime.Add(challengeTTL)) {
-			return errExpiredChallenge
+			return ErrExpiredChallenge
 		}
 		if h.opaque.IsToken {
 			return errors.New("expected challenge, got token")
@@ -253,7 +254,7 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 		}
 
 		if nowFn().After(h.opaque.CreatedTime.Add(h.TokenTTL)) {
-			return errExpiredToken
+			return ErrExpiredToken
 		}
 
 		return nil

@@ -51,7 +51,7 @@ func TestHandshake(t *testing.T) {
 			}
 
 			// Client receives the challenge and signs it. Also sends the challenge server
-			require.NoError(t, clientHandshake.ParseHeaderVal([]byte(headers.Get("WWW-Authenticate"))))
+			require.NoError(t, clientHandshake.ParseHeader(headers))
 			clear(headers)
 			require.NoError(t, clientHandshake.Run())
 			clientHandshake.SetHeader(headers)
@@ -64,11 +64,7 @@ func TestHandshake(t *testing.T) {
 			serverHandshake.SetHeader(headers)
 
 			// Client verifies sig and sets the bearer token for future requests
-			headerVal := []byte(headers.Get("Authentication-Info"))
-			if clientInitiated {
-				headerVal = []byte(headers.Get("WWW-Authenticate"))
-			}
-			require.NoError(t, clientHandshake.ParseHeaderVal(headerVal))
+			require.NoError(t, clientHandshake.ParseHeader(headers))
 			clear(headers)
 			require.NoError(t, clientHandshake.Run())
 			clientHandshake.SetHeader(headers)
@@ -118,7 +114,7 @@ func BenchmarkServerHandshake(b *testing.B) {
 	serverHandshake.SetHeader(headers)
 
 	// Client receives the challenge and signs it. Also sends the challenge server
-	require.NoError(b, clientHandshake.ParseHeaderVal([]byte(headers.Get("WWW-Authenticate"))))
+	require.NoError(b, clientHandshake.ParseHeader(headers))
 	clear(headers)
 	require.NoError(b, clientHandshake.Run())
 	clientHandshake.SetHeader(clientHeader1)
@@ -131,7 +127,7 @@ func BenchmarkServerHandshake(b *testing.B) {
 	serverHandshake.SetHeader(headers)
 
 	// Client verifies sig and sets the bearer token for future requests
-	require.NoError(b, clientHandshake.ParseHeaderVal([]byte(headers.Get("Authentication-Info"))))
+	require.NoError(b, clientHandshake.ParseHeader(headers))
 	clear(headers)
 	require.NoError(b, clientHandshake.Run())
 	clientHandshake.SetHeader(clientHeader2)
@@ -380,7 +376,7 @@ func TestSpecsExample(t *testing.T) {
 	initialWWWAuthenticate := headers.Get("WWW-Authenticate")
 
 	// Client receives the challenge and signs it. Also sends the challenge server
-	require.NoError(t, clientHandshake.ParseHeaderVal([]byte(headers.Get("WWW-Authenticate"))))
+	require.NoError(t, clientHandshake.ParseHeader(headers))
 	clear(headers)
 	require.NoError(t, clientHandshake.Run())
 	clientHandshake.SetHeader(headers)
@@ -395,7 +391,7 @@ func TestSpecsExample(t *testing.T) {
 	serverAuthentication := headers.Get("Authentication-Info")
 
 	// Client verifies sig and sets the bearer token for future requests
-	require.NoError(t, clientHandshake.ParseHeaderVal([]byte(headers.Get("Authentication-Info"))))
+	require.NoError(t, clientHandshake.ParseHeader(headers))
 	clear(headers)
 	require.NoError(t, clientHandshake.Run())
 	clientHandshake.SetHeader(headers)

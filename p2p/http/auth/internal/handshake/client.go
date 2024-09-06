@@ -38,11 +38,23 @@ type PeerIDAuthHandshakeClient struct {
 
 var errMissingChallenge = errors.New("missing challenge")
 
-func (h *PeerIDAuthHandshakeClient) ParseHeaderVal(headerVal []byte) error {
+func (h *PeerIDAuthHandshakeClient) SetInitiateChallenge() {
+	h.state = peerIDAuthClientInitiateChallenge
+}
+
+func (h *PeerIDAuthHandshakeClient) ParseHeader(header http.Header) error {
 	if h.state == peerIDAuthClientStateDone || h.state == peerIDAuthClientInitiateChallenge {
 		return nil
 	}
 	h.p = params{}
+
+	var headerVal []byte
+	switch h.state {
+	case peerIDAuthClientStateSignChallenge, peerIDAuthClientStateVerifyAndSignChallenge:
+		headerVal = []byte(header.Get("WWW-Authenticate"))
+	case peerIDAuthClientStateVerifyChallenge, peerIDAuthClientStateWaitingForBearer:
+		headerVal = []byte(header.Get("Authentication-Info"))
+	}
 
 	if len(headerVal) == 0 {
 		return errMissingChallenge
