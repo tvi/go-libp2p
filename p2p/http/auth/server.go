@@ -54,7 +54,7 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !a.ValidHostnameFn(hostname) {
-			log.Debugf("Unauthorized request for host %s: hostname not in valid set", hostname)
+			log.Debugf("Unauthorized request for host %s: hostname returned false for ValidHostnameFn", hostname)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -66,6 +66,11 @@ func (a *ServerPeerIDAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if hostname != r.TLS.ServerName {
 			log.Debugf("Unauthorized request for host %s: hostname mismatch. Expected %s", hostname, r.TLS.ServerName)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if a.ValidHostnameFn != nil && !a.ValidHostnameFn(hostname) {
+			log.Debugf("Unauthorized request for host %s: hostname returned false for ValidHostnameFn", hostname)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
