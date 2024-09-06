@@ -20,13 +20,18 @@ const challengeTTL = 5 * time.Minute
 type peerIDAuthServerState int
 
 const (
+	// Server initiated
 	peerIDAuthServerStateChallengeClient peerIDAuthServerState = iota
 	peerIDAuthServerStateVerifyChallenge
 	peerIDAuthServerStateVerifyBearer
+
+	// Client initiated
+	peerIDAuthServerStateSignChallenge
 )
 
 type opaqueState struct {
 	IsToken         bool      `json:"is-token,omitempty"`
+	ClientPublicKey []byte    `json:"client-public-key,omitempty"`
 	PeerID          peer.ID   `json:"peer-id,omitempty"`
 	ChallengeClient string    `json:"challenge-client,omitempty"`
 	Hostname        string    `json:"hostname"`
@@ -112,15 +117,19 @@ func (h *PeerIDAuthHandshakeServer) ParseHeaderVal(headerVal []byte) error {
 		return err
 	}
 	if h.p.sigB64 != nil && h.p.opaqueB64 != nil {
+	}
+	switch {
+	case h.p.sigB64 != nil && h.p.opaqueB64 != nil:
 		h.state = peerIDAuthServerStateVerifyChallenge
-		return nil
-	}
-	if h.p.bearerTokenB64 != nil {
+	case h.p.bearerTokenB64 != nil:
 		h.state = peerIDAuthServerStateVerifyBearer
-		return nil
-	}
+	case h.p.challengeServer != nil && h.p.publicKeyB64 != nil:
+		h.state = peerIDAuthServerStateSignChallenge
+	default:
+		return errInvalidHeader
 
-	return errInvalidHeader
+	}
+	return nil
 }
 
 var errExpiredChallenge = errors.New("challenge expired")
@@ -129,27 +138,36 @@ var errExpiredToken = errors.New("token expired")
 func (h *PeerIDAuthHandshakeServer) Run() error {
 	h.ran = true
 	switch h.state {
+	case peerIDAuthServerStateSignChallenge:
+		h.hb.writeScheme(PeerIDAuthScheme)
+		if err := h.addChallengeClientParam(); err != nil {
+			return err
+		}
+		if err := h.addPublicKeyParam(); err != nil {
+			return err
+		}
+
+		publicKeyBytes, err := base64.URLEncoding.AppendDecode(nil, h.p.publicKeyB64)
+		if err != nil {
+			return err
+		}
+		h.opaque.ClientPublicKey = publicKeyBytes
+		if err := h.addServerSigParam(publicKeyBytes); err != nil {
+			return err
+		}
+		if err := h.addOpaqueParam(); err != nil {
+			return err
+		}
 	case peerIDAuthServerStateChallengeClient:
 		h.hb.writeScheme(PeerIDAuthScheme)
-		{
-			_, err := io.ReadFull(randReader, h.buf[:challengeLen])
-			if err != nil {
-				return err
-			}
-			encodedChallenge := base64.URLEncoding.AppendEncode(h.buf[challengeLen:challengeLen], h.buf[:challengeLen])
-			h.opaque = opaqueState{
-				ChallengeClient: string(encodedChallenge),
-				Hostname:        h.Hostname,
-				CreatedTime:     nowFn(),
-			}
-			h.hb.writeParam("challenge-client", encodedChallenge)
+		if err := h.addChallengeClientParam(); err != nil {
+			return err
 		}
-		{
-			opaqueVal, err := h.opaque.Marshal(h.Hmac, h.buf[:0])
-			if err != nil {
-				return err
-			}
-			h.hb.writeParamB64(h.buf[len(opaqueVal):], "opaque", opaqueVal)
+		if err := h.addPublicKeyParam(); err != nil {
+			return err
+		}
+		if err := h.addOpaqueParam(); err != nil {
+			return err
 		}
 	case peerIDAuthServerStateVerifyChallenge:
 		{
@@ -173,44 +191,27 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 			return errors.New("hostname in opaque mismatch")
 		}
 
-		// If we got a public key, check that it matches the peer id
-		if len(h.p.publicKeyB64) == 0 {
-			return errors.New("missing public key")
-		}
-		publicKeyBytes, err := base64.URLEncoding.AppendDecode(nil, h.p.publicKeyB64)
-		if err != nil {
-			return err
+		var publicKeyBytes []byte
+		clientInitiatedHandshake := h.opaque.ClientPublicKey != nil
+
+		if clientInitiatedHandshake {
+			publicKeyBytes = h.opaque.ClientPublicKey
+		} else {
+			if len(h.p.publicKeyB64) == 0 {
+				return errors.New("missing public key")
+			}
+			var err error
+			publicKeyBytes, err = base64.URLEncoding.AppendDecode(nil, h.p.publicKeyB64)
+			if err != nil {
+				return err
+			}
 		}
 		pubKey, err := crypto.UnmarshalPublicKey(publicKeyBytes)
 		if err != nil {
 			return err
 		}
-
-		{
-			sig, err := base64.URLEncoding.AppendDecode(h.buf[:0], h.p.sigB64)
-			if err != nil {
-				return fmt.Errorf("failed to decode signature: %w", err)
-			}
-			err = verifySig(pubKey, PeerIDAuthScheme, []sigParam{
-				{k: "challenge-client", v: []byte(h.opaque.ChallengeClient)},
-				{k: "hostname", v: []byte(h.Hostname)},
-			}, sig)
-			if err != nil {
-				return err
-			}
-		}
-
-		if len(h.p.challengeServer) < challengeLen {
-			return errors.New("challenge too short")
-		}
-		// We authenticated the client, now authenticate ourselves
-		serverSig, err := sign(h.PrivKey, PeerIDAuthScheme, []sigParam{
-			{"challenge-server", h.p.challengeServer},
-			{"client-public-key", publicKeyBytes},
-			{"hostname", []byte(h.Hostname)},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to sign challenge: %w", err)
+		if err := h.verifySig(pubKey); err != nil {
+			return err
 		}
 
 		peerID, err := peer.IDFromPublicKey(pubKey)
@@ -225,22 +226,17 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 			Hostname:    h.Hostname,
 			CreatedTime: nowFn(),
 		}
-		serverPubKey := h.PrivKey.GetPublic()
-		pubKeyBytes, err := crypto.MarshalPublicKey(serverPubKey)
-		if err != nil {
-			return err
-		}
 
 		h.hb.writeScheme(PeerIDAuthScheme)
-		h.hb.writeParamB64(h.buf[:], "sig", serverSig)
-		{
-			bearerToken, err := h.opaque.Marshal(h.Hmac, h.buf[:0])
-			if err != nil {
+
+		if !clientInitiatedHandshake {
+			if err := h.addServerSigParam(publicKeyBytes); err != nil {
 				return err
 			}
-			h.hb.writeParamB64(h.buf[len(bearerToken):], "bearer", bearerToken)
 		}
-		h.hb.writeParamB64(h.buf[:], "public-key", pubKeyBytes)
+		if err := h.addBearerParam(); err != nil {
+			return err
+		}
 	case peerIDAuthServerStateVerifyBearer:
 		{
 			bearerToken, err := base64.URLEncoding.AppendDecode(h.buf[:0], h.p.bearerTokenB64)
@@ -266,6 +262,84 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 	return nil
 }
 
+func (h *PeerIDAuthHandshakeServer) addChallengeClientParam() error {
+	_, err := io.ReadFull(randReader, h.buf[:challengeLen])
+	if err != nil {
+		return err
+	}
+	encodedChallenge := base64.URLEncoding.AppendEncode(h.buf[challengeLen:challengeLen], h.buf[:challengeLen])
+	h.opaque.ChallengeClient = string(encodedChallenge)
+	h.opaque.Hostname = h.Hostname
+	h.opaque.CreatedTime = nowFn()
+	h.hb.writeParam("challenge-client", encodedChallenge)
+	return nil
+}
+
+func (h *PeerIDAuthHandshakeServer) addOpaqueParam() error {
+	opaqueVal, err := h.opaque.Marshal(h.Hmac, h.buf[:0])
+	if err != nil {
+		return err
+	}
+	h.hb.writeParamB64(h.buf[len(opaqueVal):], "opaque", opaqueVal)
+	return nil
+}
+
+func (h *PeerIDAuthHandshakeServer) addServerSigParam(clientPublicKeyBytes []byte) error {
+	if len(h.p.challengeServer) < challengeLen {
+		return errors.New("challenge too short")
+	}
+	serverSig, err := sign(h.PrivKey, PeerIDAuthScheme, []sigParam{
+		{"challenge-server", h.p.challengeServer},
+		{"client-public-key", clientPublicKeyBytes},
+		{"hostname", []byte(h.Hostname)},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to sign challenge: %w", err)
+	}
+	h.hb.writeParamB64(h.buf[:], "sig", serverSig)
+	return nil
+}
+
+func (h *PeerIDAuthHandshakeServer) addBearerParam() error {
+	bearerToken, err := h.opaque.Marshal(h.Hmac, h.buf[:0])
+	if err != nil {
+		return err
+	}
+	h.hb.writeParamB64(h.buf[len(bearerToken):], "bearer", bearerToken)
+	return nil
+}
+
+func (h *PeerIDAuthHandshakeServer) addPublicKeyParam() error {
+	serverPubKey := h.PrivKey.GetPublic()
+	pubKeyBytes, err := crypto.MarshalPublicKey(serverPubKey)
+	if err != nil {
+		return err
+	}
+	h.hb.writeParamB64(h.buf[:], "public-key", pubKeyBytes)
+	return nil
+}
+
+func (h *PeerIDAuthHandshakeServer) verifySig(clientPubKey crypto.PubKey) error {
+	serverPubKey := h.PrivKey.GetPublic()
+	serverPubKeyBytes, err := crypto.MarshalPublicKey(serverPubKey)
+	if err != nil {
+		return err
+	}
+	sig, err := base64.URLEncoding.AppendDecode(h.buf[:0], h.p.sigB64)
+	if err != nil {
+		return fmt.Errorf("failed to decode signature: %w", err)
+	}
+	err = verifySig(clientPubKey, PeerIDAuthScheme, []sigParam{
+		{k: "challenge-client", v: []byte(h.opaque.ChallengeClient)},
+		{k: "server-public-key", v: serverPubKeyBytes},
+		{k: "hostname", v: []byte(h.Hostname)},
+	}, sig)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // PeerID returns the peer ID of the authenticated client.
 func (h *PeerIDAuthHandshakeServer) PeerID() (peer.ID, error) {
 	if !h.ran {
@@ -286,7 +360,7 @@ func (h *PeerIDAuthHandshakeServer) SetHeader(hdr http.Header) {
 	}
 	defer h.hb.clear()
 	switch h.state {
-	case peerIDAuthServerStateChallengeClient:
+	case peerIDAuthServerStateChallengeClient, peerIDAuthServerStateSignChallenge:
 		hdr.Set("WWW-Authenticate", h.hb.b.String())
 	case peerIDAuthServerStateVerifyChallenge:
 		hdr.Set("Authentication-Info", h.hb.b.String())

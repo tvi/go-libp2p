@@ -17,6 +17,11 @@ const (
 	peerIDAuthClientStateSignChallenge peerIDAuthClientState = iota
 	peerIDAuthClientStateVerifyChallenge
 	peerIDAuthClientStateDone // We have the bearer token, and there's nothing left to do
+
+	// Client initiated handshake
+	peerIDAuthClientInitiateChallenge
+	peerIDAuthClientStateVerifyAndSignChallenge
+	peerIDAuthClientStateWaitingForBearer
 )
 
 type PeerIDAuthHandshakeClient struct {
@@ -24,7 +29,7 @@ type PeerIDAuthHandshakeClient struct {
 	PrivKey  crypto.PrivKey
 
 	serverPeerID    peer.ID
-	ran             bool
+	serverPubKey    crypto.PubKey
 	state           peerIDAuthClientState
 	p               params
 	hb              headerBuilder
@@ -34,7 +39,7 @@ type PeerIDAuthHandshakeClient struct {
 var errMissingChallenge = errors.New("missing challenge")
 
 func (h *PeerIDAuthHandshakeClient) ParseHeaderVal(headerVal []byte) error {
-	if h.state == peerIDAuthClientStateDone {
+	if h.state == peerIDAuthClientStateDone || h.state == peerIDAuthClientInitiateChallenge {
 		return nil
 	}
 	h.p = params{}
@@ -48,108 +53,147 @@ func (h *PeerIDAuthHandshakeClient) ParseHeaderVal(headerVal []byte) error {
 		return err
 	}
 
-	if h.p.challengeClient != nil {
-		h.state = peerIDAuthClientStateSignChallenge
-		return nil
+	if h.serverPubKey == nil && len(h.p.publicKeyB64) > 0 {
+		serverPubKeyBytes, err := base64.URLEncoding.AppendDecode(nil, h.p.publicKeyB64)
+		if err != nil {
+			return err
+		}
+		h.serverPubKey, err = crypto.UnmarshalPublicKey(serverPubKeyBytes)
+		if err != nil {
+			return err
+		}
+		h.serverPeerID, err = peer.IDFromPublicKey(h.serverPubKey)
+		if err != nil {
+			return err
+		}
 	}
 
-	if h.p.sigB64 != nil {
-		h.state = peerIDAuthClientStateVerifyChallenge
-		return nil
-	}
-
-	return errors.New("missing challenge or signature")
+	return err
 }
 
 func (h *PeerIDAuthHandshakeClient) Run() error {
-	h.ran = true
+	if h.state == peerIDAuthClientStateDone {
+		return nil
+	}
+
+	h.hb.clear()
 	clientPubKeyBytes, err := crypto.MarshalPublicKey(h.PrivKey.GetPublic())
 	if err != nil {
 		return err
 	}
 	switch h.state {
+	case peerIDAuthClientInitiateChallenge:
+		h.hb.writeScheme(PeerIDAuthScheme)
+		h.addChallengeServerParam()
+		h.hb.writeParamB64(nil, "public-key", clientPubKeyBytes)
+		h.state = peerIDAuthClientStateVerifyAndSignChallenge
+		return nil
+	case peerIDAuthClientStateVerifyAndSignChallenge:
+		if err := h.verifySig(clientPubKeyBytes); err != nil {
+			return err
+		}
+
+		h.hb.writeScheme(PeerIDAuthScheme)
+		h.hb.writeParam("opaque", h.p.opaqueB64)
+		h.addSigParam()
+		h.state = peerIDAuthClientStateWaitingForBearer
+		return nil
+
+	case peerIDAuthClientStateWaitingForBearer:
+		h.hb.writeScheme(PeerIDAuthScheme)
+		h.hb.writeParam("bearer", h.p.bearerTokenB64)
+		h.state = peerIDAuthClientStateDone
+		return nil
+
 	case peerIDAuthClientStateSignChallenge:
 		if len(h.p.challengeClient) < challengeLen {
 			return errors.New("challenge too short")
 		}
-		clientSig, err := sign(h.PrivKey, PeerIDAuthScheme, []sigParam{
-			{"challenge-client", h.p.challengeClient},
-			{"hostname", []byte(h.Hostname)},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to sign challenge: %w", err)
-		}
-		_, err = io.ReadFull(randReader, h.challengeServer[:])
-		if err != nil {
-			return err
-		}
-		copy(h.challengeServer[:], base64.URLEncoding.AppendEncode(nil, h.challengeServer[:]))
 
-		h.hb.clear()
 		h.hb.writeScheme(PeerIDAuthScheme)
 		h.hb.writeParamB64(nil, "public-key", clientPubKeyBytes)
-		h.hb.writeParam("challenge-server", h.challengeServer[:])
-		h.hb.writeParamB64(nil, "sig", clientSig)
+		if err := h.addChallengeServerParam(); err != nil {
+			return err
+		}
+		if err := h.addSigParam(); err != nil {
+			return err
+		}
 		h.hb.writeParam("opaque", h.p.opaqueB64)
+
+		h.state = peerIDAuthClientStateVerifyChallenge
 		return nil
 	case peerIDAuthClientStateVerifyChallenge:
-		serverPubKeyBytes, err := base64.URLEncoding.AppendDecode(nil, h.p.publicKeyB64)
-		if err != nil {
-			return err
-		}
-		sig, err := base64.URLEncoding.AppendDecode(nil, h.p.sigB64)
-		if err != nil {
-			return fmt.Errorf("failed to decode signature: %w", err)
-		}
-		serverPubKey, err := crypto.UnmarshalPublicKey(serverPubKeyBytes)
-		if err != nil {
-			return err
-		}
-		err = verifySig(serverPubKey, PeerIDAuthScheme, []sigParam{
-			{"challenge-server", h.challengeServer[:]},
-			{"client-public-key", clientPubKeyBytes},
-			{"hostname", []byte(h.Hostname)},
-		}, sig)
-		if err != nil {
-			return err
-		}
-		h.serverPeerID, err = peer.IDFromPublicKey(serverPubKey)
-		if err != nil {
+		if err := h.verifySig(clientPubKeyBytes); err != nil {
 			return err
 		}
 
-		h.hb.clear()
 		h.hb.writeScheme(PeerIDAuthScheme)
 		h.hb.writeParam("bearer", h.p.bearerTokenB64)
 		h.state = peerIDAuthClientStateDone
 
-		return nil
-	case peerIDAuthClientStateDone:
 		return nil
 	}
 
 	return errors.New("unhandled state")
 }
 
+func (h *PeerIDAuthHandshakeClient) addChallengeServerParam() error {
+	_, err := io.ReadFull(randReader, h.challengeServer[:])
+	if err != nil {
+		return err
+	}
+	copy(h.challengeServer[:], base64.URLEncoding.AppendEncode(nil, h.challengeServer[:]))
+	h.hb.writeParam("challenge-server", h.challengeServer[:])
+	return nil
+}
+
+func (h *PeerIDAuthHandshakeClient) verifySig(clientPubKeyBytes []byte) error {
+	sig, err := base64.URLEncoding.AppendDecode(nil, h.p.sigB64)
+	if err != nil {
+		return fmt.Errorf("failed to decode signature: %w", err)
+	}
+	err = verifySig(h.serverPubKey, PeerIDAuthScheme, []sigParam{
+		{"challenge-server", h.challengeServer[:]},
+		{"client-public-key", clientPubKeyBytes},
+		{"hostname", []byte(h.Hostname)},
+	}, sig)
+	return err
+}
+
+func (h *PeerIDAuthHandshakeClient) addSigParam() error {
+	if h.serverPubKey == nil {
+		return errors.New("server public key not set")
+	}
+	serverPubKeyBytes, err := crypto.MarshalPublicKey(h.serverPubKey)
+	if err != nil {
+		return err
+	}
+	clientSig, err := sign(h.PrivKey, PeerIDAuthScheme, []sigParam{
+		{"challenge-client", h.p.challengeClient},
+		{"server-public-key", serverPubKeyBytes},
+		{"hostname", []byte(h.Hostname)},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to sign challenge: %w", err)
+	}
+	h.hb.writeParamB64(nil, "sig", clientSig)
+	return nil
+
+}
+
 // PeerID returns the peer ID of the authenticated client.
 func (h *PeerIDAuthHandshakeClient) PeerID() (peer.ID, error) {
-	if !h.ran {
-		return "", errNotRan
-	}
 	switch h.state {
-	case peerIDAuthClientStateVerifyChallenge:
 	case peerIDAuthClientStateDone:
+	case peerIDAuthClientStateWaitingForBearer:
 	default:
-		return "", errors.New("not in proper state")
+		return "", errors.New("server not authenticated yet")
 	}
 
 	return h.serverPeerID, nil
 }
 
 func (h *PeerIDAuthHandshakeClient) SetHeader(hdr http.Header) {
-	if !h.ran {
-		return
-	}
 	hdr.Set("Authorization", h.hb.b.String())
 }
 
