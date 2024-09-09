@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -190,12 +192,40 @@ func TestMutualAuth(t *testing.T) {
 					require.Equal(t, http.StatusOK, resp.StatusCode)
 					require.Equal(t, expectedServerID, serverID)
 					require.NotZero(t, clientAuth.tokenMap["example.com"])
-					require.Equal(t, 3, requestsSent(), "should call newRequest 3x since our token expired")
+					require.Equal(t, 3, requestsSent(), "should call have sent 3 reqs since our token expired")
 				})
 
 			})
 		}
 	}
+}
+
+func TestBodyNotSentDuringRedirect(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+		assert.Empty(t, string(b))
+		if r.URL.Path != "/redirected" {
+			w.Header().Set("Location", "/redirected")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+			return
+		}
+	}))
+	t.Cleanup(ts.Close)
+	client := ts.Client()
+	clientKey, _, _ := crypto.GenerateEd25519Key(rand.Reader)
+	clientAuth := ClientPeerIDAuth{PrivKey: clientKey}
+
+	req, err :=
+		http.NewRequest(
+			"POST",
+			ts.URL,
+			strings.NewReader("Only for authenticated servers"),
+		)
+	req.Host = "example.com"
+	require.NoError(t, err)
+	_, _, err = clientAuth.AuthenticatedDo(client, req)
+	require.ErrorContains(t, err, "signature not set") // server doesn't actually handshake
 }
 
 type instrumentedRoundTripper struct {

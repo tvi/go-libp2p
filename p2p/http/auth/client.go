@@ -3,6 +3,7 @@ package httppeeridauth
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -16,14 +17,7 @@ type ClientPeerIDAuth struct {
 	PrivKey  crypto.PrivKey
 	TokenTTL time.Duration
 
-	tokenMapMu sync.Mutex
-	tokenMap   map[string]tokenInfo
-}
-
-type tokenInfo struct {
-	token      string
-	insertedAt time.Time
-	peerID     peer.ID
+	tm tokenMap
 }
 
 // AuthenticatedDo is like http.Client.Do, but it does the libp2p peer ID auth
@@ -34,43 +28,24 @@ type tokenInfo struct {
 // expired.
 func (a *ClientPeerIDAuth) AuthenticatedDo(client *http.Client, req *http.Request) (peer.ID, *http.Response, error) {
 	hostname := req.Host
-	a.tokenMapMu.Lock()
-	if a.tokenMap == nil {
-		a.tokenMap = make(map[string]tokenInfo)
-	}
-	ti, hasToken := a.tokenMap[hostname]
-	if hasToken && a.TokenTTL != 0 && time.Since(ti.insertedAt) > a.TokenTTL {
-		hasToken = false
-		delete(a.tokenMap, hostname)
-	}
-	a.tokenMapMu.Unlock()
-
-	clientIntiatesHandshake := !hasToken
+	ti, hasToken := a.tm.get(hostname, a.TokenTTL)
 	handshake := handshake.PeerIDAuthHandshakeClient{
 		Hostname: hostname,
 		PrivKey:  a.PrivKey,
 	}
-	if clientIntiatesHandshake {
-		handshake.SetInitiateChallenge()
-	}
 
 	if hasToken {
-		// Try to make the request with the token
-		req.Header.Set("Authorization", ti.token)
-		resp, err := client.Do(req)
-		if err != nil {
+		// We have a token. Attempt to use that, but fallback to server initiated challenge if it fails.
+		peer, resp, err := a.doWithToken(client, req, ti)
+		switch {
+		case err == nil:
+			return peer, resp, nil
+		case errors.Is(err, errTokenRejected):
+			// Token was rejected, we need to re-authenticate
+			break
+		default:
 			return "", nil, err
 		}
-		if resp.StatusCode != http.StatusUnauthorized {
-			// our token is still valid
-			return ti.peerID, resp, nil
-		}
-		if req.GetBody == nil {
-			// We can't retry this request even if we wanted to.
-			// Return the response and an error
-			return "", resp, errors.New("expired token. Couldn't run handshake because req.GetBody is nil")
-		}
-		resp.Body.Close()
 
 		// Token didn't work, we need to re-authenticate.
 		// Run the server-initiated handshake
@@ -81,85 +56,139 @@ func (a *ClientPeerIDAuth) AuthenticatedDo(client *http.Client, req *http.Reques
 		}
 
 		handshake.ParseHeader(resp.Header)
+	} else {
+		// We didn't have a handshake token, so we initiate the handshake.
+		// If our token was rejected, the server initiates the handshake.
+		handshake.SetInitiateChallenge()
 	}
-	originalBody := req.Body
 
-	handshake.Run()
-	handshake.SetHeader(req.Header)
+	serverPeerID, resp, err := a.runHandshake(client, req, clearBody(req), &handshake)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to run handshake: %w", err)
+	}
+	a.tm.set(hostname, tokenInfo{
+		token:      handshake.BearerToken(),
+		insertedAt: time.Now(),
+		peerID:     serverPeerID,
+	})
+	return serverPeerID, resp, nil
+}
 
-	// Don't send the body before we've authenticated the server
-	req.Body = nil
+func (a *ClientPeerIDAuth) runHandshake(client *http.Client, req *http.Request, b bodyMeta, hs *handshake.PeerIDAuthHandshakeClient) (peer.ID, *http.Response, error) {
+	maxSteps := 5 // Avoid infinite loops in case of buggy handshake. Shouldn't happen.
+	var resp *http.Response
+
+	err := hs.Run()
+	if err != nil {
+		return "", nil, err
+	}
+
+	sentBody := false
+	for !hs.HandshakeDone() || !sentBody {
+		req = req.Clone(req.Context())
+		hs.AddHeader(req.Header)
+		if hs.ServerAuthenticated() {
+			sentBody = true
+			b.setBody(req)
+		}
+
+		resp, err = client.Do(req)
+		if err != nil {
+			return "", nil, err
+		}
+
+		hs.ParseHeader(resp.Header)
+		err = hs.Run()
+		if err != nil {
+			resp.Body.Close()
+			return "", nil, err
+		}
+
+		if maxSteps--; maxSteps == 0 {
+			return "", nil, errors.New("handshake took too many steps")
+		}
+	}
+
+	p, err := hs.PeerID()
+	if err != nil {
+		resp.Body.Close()
+		return "", nil, err
+	}
+	return p, resp, nil
+}
+
+var errTokenRejected = errors.New("token rejected")
+
+func (a *ClientPeerIDAuth) doWithToken(client *http.Client, req *http.Request, ti tokenInfo) (peer.ID, *http.Response, error) {
+	// Try to make the request with the token
+	req.Header.Set("Authorization", ti.token)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", nil, err
 	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		// our token is still valid
+		return ti.peerID, resp, nil
+	}
+	if req.GetBody == nil {
+		// We can't retry this request even if we wanted to.
+		// Return the response and an error
+		return "", resp, errors.New("expired token. Couldn't run handshake because req.GetBody is nil")
+	}
 	resp.Body.Close()
 
-	err = handshake.ParseHeader(resp.Header)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to parse auth header: %w", err)
-	}
-	err = handshake.Run()
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to run handshake: %w", err)
-	}
+	return "", resp, errTokenRejected
+}
 
-	serverWasAuthenticated := false
-	_, err = handshake.PeerID()
-	if err == nil {
-		serverWasAuthenticated = true
-	}
+type bodyMeta struct {
+	body          io.ReadCloser
+	contentLength int64
+	getBody       func() (io.ReadCloser, error)
+}
 
-	req = req.Clone(req.Context())
-	if serverWasAuthenticated {
-		req.Body = originalBody
-	} else {
-		// Don't send the body before we've authenticated the server
+func clearBody(req *http.Request) bodyMeta {
+	defer func() {
 		req.Body = nil
-	}
-	handshake.SetHeader(req.Header)
-	resp, err = client.Do(req)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to do authenticated request: %w", err)
-	}
+		req.ContentLength = 0
+		req.GetBody = nil
+	}()
+	return bodyMeta{body: req.Body, contentLength: req.ContentLength, getBody: req.GetBody}
+}
 
-	err = handshake.ParseHeader(resp.Header)
-	if err != nil {
-		resp.Body.Close()
-		return "", nil, fmt.Errorf("failed to parse auth info header: %w", err)
-	}
-	err = handshake.Run()
-	if err != nil {
-		resp.Body.Close()
-		return "", nil, fmt.Errorf("failed to run auth info handshake: %w", err)
-	}
+func (b *bodyMeta) setBody(req *http.Request) {
+	req.Body = b.body
+	req.ContentLength = b.contentLength
+	req.GetBody = b.getBody
+}
 
-	serverPeerID, err := handshake.PeerID()
-	if err != nil {
-		resp.Body.Close()
-		return "", nil, fmt.Errorf("failed to get server's peer ID: %w", err)
-	}
-	a.tokenMapMu.Lock()
-	a.tokenMap[hostname] = tokenInfo{
-		token:      handshake.BearerToken(),
-		insertedAt: time.Now(),
-		peerID:     serverPeerID,
-	}
-	a.tokenMapMu.Unlock()
+type tokenInfo struct {
+	token      string
+	insertedAt time.Time
+	peerID     peer.ID
+}
 
-	if serverWasAuthenticated {
-		return serverPeerID, resp, nil
-	}
+type tokenMap struct {
+	tokenMapMu sync.Mutex
+	tokenMap   map[string]tokenInfo
+}
 
-	// Server wasn't authenticated earlier.
-	// We need to make one final request with the body now that we authenticated
-	// the server.
-	req = req.Clone(req.Context())
-	req.Body = originalBody
-	handshake.SetHeader(req.Header)
-	resp, err = client.Do(req)
-	if err != nil {
-		return "", nil, fmt.Errorf("failed to do authenticated request: %w", err)
+func (tm *tokenMap) get(hostname string, ttl time.Duration) (tokenInfo, bool) {
+	tm.tokenMapMu.Lock()
+	defer tm.tokenMapMu.Unlock()
+
+	ti, ok := tm.tokenMap[hostname]
+	if ok && ttl != 0 && time.Since(ti.insertedAt) > ttl {
+		delete(tm.tokenMap, hostname)
+		return tokenInfo{}, false
 	}
-	return serverPeerID, resp, nil
+	return ti, ok
+}
+
+func (tm *tokenMap) set(hostname string, ti tokenInfo) {
+	tm.tokenMapMu.Lock()
+	defer tm.tokenMapMu.Unlock()
+	if tm.tokenMap == nil {
+		tm.tokenMap = make(map[string]tokenInfo)
+	}
+	tm.tokenMap[hostname] = ti
 }
