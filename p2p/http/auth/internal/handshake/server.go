@@ -111,6 +111,7 @@ func (h *PeerIDAuthHandshakeServer) Reset() {
 	h.hb.clear()
 	h.opaque = opaqueState{}
 }
+
 func (h *PeerIDAuthHandshakeServer) ParseHeaderVal(headerVal []byte) error {
 	if len(headerVal) == 0 {
 		// We are in the initial state. Nothing to parse.
@@ -119,8 +120,6 @@ func (h *PeerIDAuthHandshakeServer) ParseHeaderVal(headerVal []byte) error {
 	err := h.p.parsePeerIDAuthSchemeParams(headerVal)
 	if err != nil {
 		return err
-	}
-	if h.p.sigB64 != nil && h.p.opaqueB64 != nil {
 	}
 	switch {
 	case h.p.sigB64 != nil && h.p.opaqueB64 != nil:
@@ -171,16 +170,15 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 			return err
 		}
 	case peerIDAuthServerStateVerifyChallenge:
-		{
-			opaque, err := base64.URLEncoding.AppendDecode(h.buf[:0], h.p.opaqueB64)
-			if err != nil {
-				return err
-			}
-			err = h.opaque.Unmarshal(h.Hmac, opaque)
-			if err != nil {
-				return err
-			}
+		opaque, err := base64.URLEncoding.AppendDecode(h.buf[:0], h.p.opaqueB64)
+		if err != nil {
+			return err
 		}
+		err = h.opaque.Unmarshal(h.Hmac, opaque)
+		if err != nil {
+			return err
+		}
+
 		if nowFn().After(h.opaque.CreatedTime.Add(challengeTTL)) {
 			return ErrExpiredChallenge
 		}
@@ -239,16 +237,15 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 			return err
 		}
 	case peerIDAuthServerStateVerifyBearer:
-		{
-			bearerToken, err := base64.URLEncoding.AppendDecode(h.buf[:0], h.p.bearerTokenB64)
-			if err != nil {
-				return err
-			}
-			err = h.opaque.Unmarshal(h.Hmac, bearerToken)
-			if err != nil {
-				return err
-			}
+		bearerToken, err := base64.URLEncoding.AppendDecode(h.buf[:0], h.p.bearerTokenB64)
+		if err != nil {
+			return err
 		}
+		err = h.opaque.Unmarshal(h.Hmac, bearerToken)
+		if err != nil {
+			return err
+		}
+
 		if !h.opaque.IsToken {
 			return errors.New("expected token, got challenge")
 		}

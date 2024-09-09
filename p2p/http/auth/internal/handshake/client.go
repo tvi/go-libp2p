@@ -160,6 +160,9 @@ func (h *PeerIDAuthHandshakeClient) addChallengeServerParam() error {
 }
 
 func (h *PeerIDAuthHandshakeClient) verifySig(clientPubKeyBytes []byte) error {
+	if len(h.p.sigB64) == 0 {
+		return errors.New("signature not set")
+	}
 	sig, err := base64.URLEncoding.AppendDecode(nil, h.p.sigB64)
 	if err != nil {
 		return fmt.Errorf("failed to decode signature: %w", err)
@@ -205,7 +208,7 @@ func (h *PeerIDAuthHandshakeClient) PeerID() (peer.ID, error) {
 	return h.serverPeerID, nil
 }
 
-func (h *PeerIDAuthHandshakeClient) SetHeader(hdr http.Header) {
+func (h *PeerIDAuthHandshakeClient) AddHeader(hdr http.Header) {
 	hdr.Set("Authorization", h.hb.b.String())
 }
 
@@ -216,4 +219,19 @@ func (h *PeerIDAuthHandshakeClient) BearerToken() string {
 		return ""
 	}
 	return h.hb.b.String()
+}
+
+func (h *PeerIDAuthHandshakeClient) ServerAuthenticated() bool {
+	switch h.state {
+	case peerIDAuthClientStateDone:
+	case peerIDAuthClientStateWaitingForBearer:
+	default:
+		return false
+	}
+
+	return h.serverPeerID != ""
+}
+
+func (h *PeerIDAuthHandshakeClient) HandshakeDone() bool {
+	return h.state == peerIDAuthClientStateDone
 }

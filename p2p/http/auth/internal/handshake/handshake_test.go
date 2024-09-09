@@ -54,7 +54,7 @@ func TestHandshake(t *testing.T) {
 			require.NoError(t, clientHandshake.ParseHeader(headers))
 			clear(headers)
 			require.NoError(t, clientHandshake.Run())
-			clientHandshake.SetHeader(headers)
+			clientHandshake.AddHeader(headers)
 
 			// Server receives the sig and verifies it. Also signs the challenge server
 			serverHandshake.Reset()
@@ -67,7 +67,7 @@ func TestHandshake(t *testing.T) {
 			require.NoError(t, clientHandshake.ParseHeader(headers))
 			clear(headers)
 			require.NoError(t, clientHandshake.Run())
-			clientHandshake.SetHeader(headers)
+			clientHandshake.AddHeader(headers)
 
 			// Server verifies the bearer token
 			serverHandshake.Reset()
@@ -117,7 +117,7 @@ func BenchmarkServerHandshake(b *testing.B) {
 	require.NoError(b, clientHandshake.ParseHeader(headers))
 	clear(headers)
 	require.NoError(b, clientHandshake.Run())
-	clientHandshake.SetHeader(clientHeader1)
+	clientHandshake.AddHeader(clientHeader1)
 
 	// Server receives the sig and verifies it. Also signs the challenge server
 	serverHandshake.Reset()
@@ -130,7 +130,7 @@ func BenchmarkServerHandshake(b *testing.B) {
 	require.NoError(b, clientHandshake.ParseHeader(headers))
 	clear(headers)
 	require.NoError(b, clientHandshake.Run())
-	clientHandshake.SetHeader(clientHeader2)
+	clientHandshake.AddHeader(clientHeader2)
 
 	// Server verifies the bearer token
 	serverHandshake.Reset()
@@ -379,7 +379,7 @@ func TestSpecsExample(t *testing.T) {
 	require.NoError(t, clientHandshake.ParseHeader(headers))
 	clear(headers)
 	require.NoError(t, clientHandshake.Run())
-	clientHandshake.SetHeader(headers)
+	clientHandshake.AddHeader(headers)
 	clientAuthentication := headers.Get("Authorization")
 
 	// Server receives the sig and verifies it. Also signs the challenge server
@@ -394,7 +394,7 @@ func TestSpecsExample(t *testing.T) {
 	require.NoError(t, clientHandshake.ParseHeader(headers))
 	clear(headers)
 	require.NoError(t, clientHandshake.Run())
-	clientHandshake.SetHeader(headers)
+	clientHandshake.AddHeader(headers)
 	clientBearerToken := headers.Get("Authorization")
 
 	params := params{}

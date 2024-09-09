@@ -19,7 +19,7 @@ import (
 
 const PeerIDAuthScheme = "libp2p-PeerID"
 const challengeLen = 32
-const maxHeaderSize = 8192
+const maxHeaderSize = 2048
 
 var peerIDAuthSchemeBytes = []byte(PeerIDAuthScheme)
 
@@ -144,6 +144,9 @@ func (h *headerBuilder) writeParamB64(buf []byte, key string, val []byte) {
 
 // writeParam writes a key value pair to the header. It writes the val as-is.
 func (h *headerBuilder) writeParam(key string, val []byte) {
+	if len(val) == 0 {
+		return
+	}
 	h.maybeAddComma()
 
 	h.b.Grow(len(key) + len(`="`) + len(val) + 1)
@@ -160,6 +163,10 @@ type sigParam struct {
 }
 
 func verifySig(publicKey crypto.PubKey, prefix string, signedParts []sigParam, sig []byte) error {
+	if publicKey == nil {
+		return fmt.Errorf("no public key to verify signature")
+	}
+
 	b := pool.Get(4096)
 	defer pool.Put(b)
 	buf, err := genDataToSign(b[:0], prefix, signedParts)
@@ -178,6 +185,9 @@ func verifySig(publicKey crypto.PubKey, prefix string, signedParts []sigParam, s
 }
 
 func sign(privKey crypto.PrivKey, prefix string, partsToSign []sigParam) ([]byte, error) {
+	if privKey == nil {
+		return nil, fmt.Errorf("no private key available to sign")
+	}
 	b := pool.Get(4096)
 	defer pool.Put(b)
 	buf, err := genDataToSign(b[:0], prefix, partsToSign)
