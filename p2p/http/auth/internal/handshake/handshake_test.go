@@ -498,6 +498,112 @@ Client->>Server: Authorization=%s
 
 }
 
+func TestSpecsClientInitiatedExample(t *testing.T) {
+	originalRandReader := randReader
+	originalNowFn := nowFn
+	randReader = bytes.NewReader(append(
+		bytes.Repeat([]byte{0x11}, 32),
+		bytes.Repeat([]byte{0x33}, 32)...,
+	))
+	nowFn = func() time.Time {
+		return time.Unix(0, 0)
+	}
+	defer func() {
+		randReader = originalRandReader
+		nowFn = originalNowFn
+	}()
+
+	parameters := specsExampleParameters{
+		hostname: "example.com",
+	}
+	serverPrivBytes, err := hex.AppendDecode(nil, []byte("0801124001010101010101010101010101010101010101010101010101010101010101018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c"))
+	require.NoError(t, err)
+	clientPrivBytes, err := hex.AppendDecode(nil, []byte("0801124002020202020202020202020202020202020202020202020202020202020202028139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394"))
+	require.NoError(t, err)
+
+	parameters.serverPriv, err = crypto.UnmarshalPrivateKey(serverPrivBytes)
+	require.NoError(t, err)
+
+	parameters.clientPriv, err = crypto.UnmarshalPrivateKey(clientPrivBytes)
+	require.NoError(t, err)
+
+	serverHandshake := PeerIDAuthHandshakeServer{
+		Hostname: parameters.hostname,
+		PrivKey:  parameters.serverPriv,
+		TokenTTL: time.Hour,
+		Hmac:     hmac.New(sha256.New, parameters.serverHmacKey[:]),
+	}
+
+	clientHandshake := PeerIDAuthHandshakeClient{
+		Hostname: parameters.hostname,
+		PrivKey:  parameters.clientPriv,
+	}
+
+	headers := make(http.Header)
+
+	// Start the handshake
+	clientHandshake.SetInitiateChallenge()
+	require.NoError(t, clientHandshake.Run())
+	clientHandshake.AddHeader(headers)
+	clientChallenge := headers.Get("Authorization")
+
+	// Server receives the challenge and signs it. Also sends challenge-client
+	serverHandshake.Reset()
+	require.NoError(t, serverHandshake.ParseHeaderVal([]byte(headers.Get("Authorization"))))
+	clear(headers)
+	require.NoError(t, serverHandshake.Run())
+	serverHandshake.SetHeader(headers)
+	serverAuthentication := headers.Get("WWW-Authenticate")
+	params := params{}
+	params.parsePeerIDAuthSchemeParams([]byte(serverAuthentication))
+	challengeClient := params.challengeClient
+
+	// Client verifies sig and signs the challenge-client
+	require.NoError(t, clientHandshake.ParseHeader(headers))
+	clear(headers)
+	require.NoError(t, clientHandshake.Run())
+	clientHandshake.AddHeader(headers)
+	clientAuthentication := headers.Get("Authorization")
+
+	// Server verifies sig and sets the bearer token
+	serverHandshake.Reset()
+	require.NoError(t, serverHandshake.ParseHeaderVal([]byte(headers.Get("Authorization"))))
+	clear(headers)
+	require.NoError(t, serverHandshake.Run())
+	serverHandshake.SetHeader(headers)
+	serverReplayWithBearer := headers.Get("Authentication-Info")
+
+	params.parsePeerIDAuthSchemeParams([]byte(clientChallenge))
+	challengeServer := params.challengeServer
+
+	fmt.Println("### Parameters")
+	fmt.Println("| Parameter | Value |")
+	fmt.Println("| --- | --- |")
+	fmt.Printf("| hostname | %s |\n", parameters.hostname)
+	fmt.Printf("| Server Private Key (pb encoded as hex) | %s |\n", hex.EncodeToString(serverPrivBytes))
+	fmt.Printf("| Server HMAC Key (hex) | %s |\n", hex.EncodeToString(parameters.serverHmacKey[:]))
+	fmt.Printf("| Challenge Client | %s |\n", string(challengeClient))
+	fmt.Printf("| Client Private Key (pb encoded as hex) | %s |\n", hex.EncodeToString(clientPrivBytes))
+	fmt.Printf("| Challenge Server | %s |\n", string(challengeServer))
+	fmt.Printf("| \"Now\" time | %s |\n", nowFn())
+	fmt.Println()
+	fmt.Println("### Handshake Diagram")
+
+	fmt.Println("```mermaid")
+	fmt.Printf(`sequenceDiagram
+Client->>Server: Authorization=%s
+Server->>Client: WWW-Authenticate=%s
+Note right of Client: Client has authenticated Server
+
+Client->>Server: Authorization=%s
+Note left of Server: Server has authenticated Client
+Server->>Client: Authentication-Info=%s
+Note over Client: Future requests use the bearer token
+`, clientChallenge, serverAuthentication, clientAuthentication, serverReplayWithBearer)
+	fmt.Println("```")
+
+}
+
 func TestSigningExample(t *testing.T) {
 	serverPrivBytes, err := hex.AppendDecode(nil, []byte("0801124001010101010101010101010101010101010101010101010101010101010101018a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c"))
 	require.NoError(t, err)
