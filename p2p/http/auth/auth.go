@@ -7,4 +7,4 @@ import (
 
 const PeerIDAuthScheme = handshake.PeerIDAuthScheme
 
-var log = logging.Logger("httppeeridauth")
+var log = logging.Logger("http-peer-id-auth")
