@@ -129,7 +129,7 @@ func TestMutualAuth(t *testing.T) {
 				serverID, resp, err := clientAuth.AuthenticatedDo(client, req)
 				require.NoError(t, err)
 				require.Equal(t, expectedServerID, serverID)
-				require.NotZero(t, clientAuth.tokenMap["example.com"])
+				require.NotZero(t, clientAuth.tm.tokenMap["example.com"])
 				require.Equal(t, http.StatusOK, resp.StatusCode)
 				require.Equal(t, 2, requestsSent())
 
@@ -141,7 +141,7 @@ func TestMutualAuth(t *testing.T) {
 				require.NotEmpty(t, req.Header.Get("Authorization"))
 				require.NoError(t, err)
 				require.Equal(t, expectedServerID, serverID)
-				require.NotZero(t, clientAuth.tokenMap["example.com"])
+				require.NotZero(t, clientAuth.tm.tokenMap["example.com"])
 				require.Equal(t, http.StatusOK, resp.StatusCode)
 				require.Equal(t, 1, requestsSent(), "should only call newRequest once since we have a token")
 
@@ -165,7 +165,7 @@ func TestMutualAuth(t *testing.T) {
 					require.NotEmpty(t, req.Header.Get("Authorization"))
 					require.Equal(t, http.StatusOK, resp.StatusCode)
 					require.Equal(t, expectedServerID, serverID)
-					require.NotZero(t, clientAuth.tokenMap["example.com"])
+					require.NotZero(t, clientAuth.tm.tokenMap["example.com"])
 					require.Equal(t, 3, requestsSent(), "should call newRequest 3x since our token expired")
 				})
 
@@ -191,7 +191,7 @@ func TestMutualAuth(t *testing.T) {
 					require.NotEmpty(t, req.Header.Get("Authorization"))
 					require.Equal(t, http.StatusOK, resp.StatusCode)
 					require.Equal(t, expectedServerID, serverID)
-					require.NotZero(t, clientAuth.tokenMap["example.com"])
+					require.NotZero(t, clientAuth.tm.tokenMap["example.com"])
 					require.Equal(t, 3, requestsSent(), "should call have sent 3 reqs since our token expired")
 				})
 
