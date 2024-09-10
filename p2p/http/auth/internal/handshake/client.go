@@ -101,6 +101,11 @@ func (h *PeerIDAuthHandshakeClient) Run() error {
 		h.state = peerIDAuthClientStateVerifyAndSignChallenge
 		return nil
 	case peerIDAuthClientStateVerifyAndSignChallenge:
+		if len(h.p.sigB64) == 0 && len(h.p.challengeClient) != 0 {
+			// The server refused a client initiated handshake, so we need run the server initiated handshake
+			h.state = peerIDAuthClientStateSignChallenge
+			return h.Run()
+		}
 		if err := h.verifySig(clientPubKeyBytes); err != nil {
 			return err
 		}

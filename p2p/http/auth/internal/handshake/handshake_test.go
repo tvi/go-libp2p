@@ -50,26 +50,31 @@ func TestHandshake(t *testing.T) {
 				serverHandshake.SetHeader(headers)
 			}
 
-			// Client receives the challenge and signs it. Also sends the challenge server
+			// Server Inititated: Client receives the challenge and signs it. Also sends the challenge server
+			// Client Inititated: Client forms the challenge and sends it
 			require.NoError(t, clientHandshake.ParseHeader(headers))
 			clear(headers)
 			require.NoError(t, clientHandshake.Run())
 			clientHandshake.AddHeader(headers)
 
-			// Server receives the sig and verifies it. Also signs the challenge server
+			// Server Inititated: Server receives the sig and verifies it. Also signs the challenge-server (client authenticated)
+			// Client Inititated: Server receives the challenge and signs it. Also sends the challenge-client
 			serverHandshake.Reset()
 			require.NoError(t, serverHandshake.ParseHeaderVal([]byte(headers.Get("Authorization"))))
 			clear(headers)
 			require.NoError(t, serverHandshake.Run())
 			serverHandshake.SetHeader(headers)
 
-			// Client verifies sig and sets the bearer token for future requests
+			// Server Inititated: Client verifies sig and sets the bearer token for future requests  (server authenticated)
+			// Client Inititated: Client verifies sig, and signs challenge. Sends it along with any application data (server authenticated)
 			require.NoError(t, clientHandshake.ParseHeader(headers))
 			clear(headers)
 			require.NoError(t, clientHandshake.Run())
 			clientHandshake.AddHeader(headers)
 
-			// Server verifies the bearer token
+			// Server Inititated: Server verifies the bearer token
+			// Client Inititated: Server verifies the sig, sets the bearer token (client authenticated)
+			// and processes any application data
 			serverHandshake.Reset()
 			require.NoError(t, serverHandshake.ParseHeaderVal([]byte(headers.Get("Authorization"))))
 			clear(headers)
@@ -87,6 +92,67 @@ func TestHandshake(t *testing.T) {
 			require.Equal(t, expectedServerPeerID, serverPeerID)
 		})
 	}
+}
+
+func TestServerRefusesClientInitiatedHandshake(t *testing.T) {
+	hostname := "example.com"
+	serverPriv, _, _ := crypto.GenerateEd25519Key(rand.Reader)
+	clientPriv, _, _ := crypto.GenerateEd25519Key(rand.Reader)
+
+	serverHandshake := PeerIDAuthHandshakeServer{
+		Hostname: hostname,
+		PrivKey:  serverPriv,
+		TokenTTL: time.Hour,
+		Hmac:     hmac.New(sha256.New, make([]byte, 32)),
+	}
+
+	clientHandshake := PeerIDAuthHandshakeClient{
+		Hostname: hostname,
+		PrivKey:  clientPriv,
+	}
+	clientHandshake.SetInitiateChallenge()
+
+	headers := make(http.Header)
+	// Client initiates the handshake
+	require.NoError(t, clientHandshake.Run())
+	clientHandshake.AddHeader(headers)
+
+	// Server receives the challenge-server, but chooses to reject it (simulating this by not passing the challenge)
+	serverHandshake.Reset()
+	require.NoError(t, serverHandshake.ParseHeaderVal(nil))
+	clear(headers)
+	require.NoError(t, serverHandshake.Run())
+	serverHandshake.SetHeader(headers)
+
+	// Client now runs the server-initiated handshake. Signs challenge-client; sends challenge-server
+	require.NoError(t, clientHandshake.ParseHeader(headers))
+	clear(headers)
+	require.NoError(t, clientHandshake.Run())
+	clientHandshake.AddHeader(headers)
+
+	// Server verifies the challenge-client and signs the challenge-server
+	serverHandshake.Reset()
+	require.NoError(t, serverHandshake.ParseHeaderVal([]byte(headers.Get("Authorization"))))
+	clear(headers)
+	require.NoError(t, serverHandshake.Run())
+	serverHandshake.SetHeader(headers)
+
+	// Client verifies the challenge-server and sets the bearer token
+	require.NoError(t, clientHandshake.ParseHeader(headers))
+	clear(headers)
+	require.NoError(t, clientHandshake.Run())
+	clientHandshake.AddHeader(headers)
+
+	expectedClientPeerID, _ := peer.IDFromPrivateKey(clientPriv)
+	expectedServerPeerID, _ := peer.IDFromPrivateKey(serverPriv)
+	clientPeerID, err := serverHandshake.PeerID()
+	require.NoError(t, err)
+	require.Equal(t, expectedClientPeerID, clientPeerID)
+
+	serverPeerID, err := clientHandshake.PeerID()
+	require.NoError(t, err)
+	require.True(t, clientHandshake.HandshakeDone())
+	require.Equal(t, expectedServerPeerID, serverPeerID)
 }
 
 func BenchmarkServerHandshake(b *testing.B) {
