@@ -502,8 +502,8 @@ func TestSpecsClientInitiatedExample(t *testing.T) {
 	originalRandReader := randReader
 	originalNowFn := nowFn
 	randReader = bytes.NewReader(append(
-		bytes.Repeat([]byte{0x11}, 32),
-		bytes.Repeat([]byte{0x33}, 32)...,
+		bytes.Repeat([]byte{0x33}, 32),
+		bytes.Repeat([]byte{0x11}, 32)...,
 	))
 	nowFn = func() time.Time {
 		return time.Unix(0, 0)

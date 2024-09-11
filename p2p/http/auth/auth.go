@@ -6,5 +6,6 @@ import (
 )
 
 const PeerIDAuthScheme = handshake.PeerIDAuthScheme
+const ProtocolID = "/http-peer-id-auth/1.0.0"
 
 var log = logging.Logger("http-peer-id-auth")
