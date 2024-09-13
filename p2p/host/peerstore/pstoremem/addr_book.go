@@ -1,6 +1,7 @@
 package pstoremem
 
 import (
+	"container/heap"
 	"context"
 	"fmt"
 	"sort"
@@ -21,6 +22,9 @@ type expiringAddr struct {
 	Addr    ma.Multiaddr
 	TTL     time.Duration
 	Expires time.Time
+
+	// to sort by expiry time
+	heapIndex int
 }
 
 func (e *expiringAddr) ExpiredBy(t time.Time) bool {
@@ -34,13 +38,63 @@ type peerRecordState struct {
 
 type addrSegments [256]*addrSegment
 
+type sortedAddrsByExpiry struct {
+	m     map[string]*expiringAddr
+	order []*expiringAddr
+}
+
+// Essentially Go stdlib's Priority Queue example
+var _ heap.Interface = &sortedAddrsByExpiry{}
+
+func (s *sortedAddrsByExpiry) Len() int { return len(s.order) }
+func (s *sortedAddrsByExpiry) Less(i, j int) bool {
+	return s.order[i].Expires.Before(s.order[j].Expires)
+}
+func (s *sortedAddrsByExpiry) Swap(i, j int) {
+	s.order[i], s.order[j] = s.order[j], s.order[i]
+	s.order[i].heapIndex = i
+	s.order[j].heapIndex = j
+}
+func (s *sortedAddrsByExpiry) Push(x any) {
+	a := x.(*expiringAddr)
+	s.m[string(a.Addr.Bytes())] = a
+	a.heapIndex = len(s.order)
+	s.order = append(s.order, a)
+}
+func (s *sortedAddrsByExpiry) Pop() any {
+	old := s.order
+	n := len(old)
+	x := old[n-1]
+	x.heapIndex = -1
+	s.order = old[0 : n-1]
+	delete(s.m, string(x.Addr.Bytes()))
+	return x
+}
+
+func (s *sortedAddrsByExpiry) Fix(a *expiringAddr) {
+	heap.Fix(s, a.heapIndex)
+}
+
+func (s *sortedAddrsByExpiry) Delete(a *expiringAddr) {
+	heap.Remove(s, a.heapIndex)
+	a.heapIndex = -1
+	delete(s.m, string(a.Addr.Bytes()))
+}
+
+func (s *sortedAddrsByExpiry) gc(now time.Time) {
+	for len(s.order) > 0 && s.order[len(s.order)-1].ExpiredBy(now) {
+		v := s.Pop().(*expiringAddr)
+		delete(s.m, string(v.Addr.Bytes()))
+	}
+}
+
 type addrSegment struct {
 	sync.RWMutex
 
 	// Use pointers to save memory. Maps always leave some fraction of their
 	// space unused. storing the *values* directly in the map will
 	// drastically increase the space waste. In our case, by 6x.
-	addrs map[peer.ID]map[string]*expiringAddr
+	addrs map[peer.ID]*sortedAddrsByExpiry
 
 	signedPeerRecords map[peer.ID]*peerRecordState
 }
@@ -83,7 +137,7 @@ func NewAddrBook() *memoryAddrBook {
 		segments: func() (ret addrSegments) {
 			for i := range ret {
 				ret[i] = &addrSegment{
-					addrs:             make(map[peer.ID]map[string]*expiringAddr),
+					addrs:             make(map[peer.ID]*sortedAddrsByExpiry),
 					signedPeerRecords: make(map[peer.ID]*peerRecordState)}
 			}
 			return ret
@@ -134,12 +188,8 @@ func (mab *memoryAddrBook) gc() {
 	for _, s := range mab.segments {
 		s.Lock()
 		for p, amap := range s.addrs {
-			for k, addr := range amap {
-				if addr.ExpiredBy(now) {
-					delete(amap, k)
-				}
-			}
-			if len(amap) == 0 {
+			amap.gc(now)
+			if amap.Len() == 0 {
 				delete(s.addrs, p)
 				delete(s.signedPeerRecords, p)
 			}
@@ -154,7 +204,7 @@ func (mab *memoryAddrBook) PeersWithAddrs() peer.IDSlice {
 	for _, s := range mab.segments {
 		s.RLock()
 		for pid, amap := range s.addrs {
-			if len(amap) > 0 {
+			if amap.Len() > 0 {
 				set[pid] = struct{}{}
 			}
 		}
@@ -232,7 +282,10 @@ func (mab *memoryAddrBook) addAddrsUnlocked(s *addrSegment, p peer.ID, addrs []m
 
 	amap, ok := s.addrs[p]
 	if !ok {
-		amap = make(map[string]*expiringAddr)
+		amap = &sortedAddrsByExpiry{
+			m:     make(map[string]*expiringAddr),
+			order: nil,
+		}
 		s.addrs[p] = amap
 	}
 
@@ -250,19 +303,25 @@ func (mab *memoryAddrBook) addAddrsUnlocked(s *addrSegment, p peer.ID, addrs []m
 		}
 		// find the highest TTL and Expiry time between
 		// existing records and function args
-		a, found := amap[string(addr.Bytes())] // won't allocate.
+		a, found := amap.m[string(addr.Bytes())] // won't allocate.
 		if !found {
 			// not found, announce it.
 			entry := &expiringAddr{Addr: addr, Expires: exp, TTL: ttl}
-			amap[string(addr.Bytes())] = entry
+			amap.Push(entry)
 			mab.subManager.BroadcastAddr(p, addr)
 		} else {
 			// update ttl & exp to whichever is greater between new and existing entry
+			var changed bool
 			if ttl > a.TTL {
+				changed = true
 				a.TTL = ttl
 			}
 			if exp.After(a.Expires) {
+				changed = true
 				a.Expires = exp
+			}
+			if changed {
+				amap.Fix(a)
 			}
 		}
 	}
@@ -282,7 +341,9 @@ func (mab *memoryAddrBook) SetAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Du
 
 	amap, ok := s.addrs[p]
 	if !ok {
-		amap = make(map[string]*expiringAddr)
+		amap = &sortedAddrsByExpiry{
+			m: make(map[string]*expiringAddr),
+		}
 		s.addrs[p] = amap
 	}
 
@@ -298,14 +359,23 @@ func (mab *memoryAddrBook) SetAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Du
 			continue
 		}
 		aBytes := addr.Bytes()
-		key := string(aBytes)
 
-		// re-set all of them for new ttl.
-		if ttl > 0 {
-			amap[key] = &expiringAddr{Addr: addr, Expires: exp, TTL: ttl}
-			mab.subManager.BroadcastAddr(p, addr)
+		if a, found := amap.m[string(aBytes)]; found {
+			// re-set all of them for new ttl.
+			if ttl > 0 {
+				a.Addr = addr
+				a.Expires = exp
+				a.TTL = ttl
+				amap.Fix(a)
+				mab.subManager.BroadcastAddr(p, addr)
+			} else {
+				amap.Delete(a)
+			}
 		} else {
-			delete(amap, key)
+			if ttl > 0 {
+				amap.Push(&expiringAddr{Addr: addr, Expires: exp, TTL: ttl})
+				mab.subManager.BroadcastAddr(p, addr)
+			}
 		}
 	}
 }
@@ -322,14 +392,14 @@ func (mab *memoryAddrBook) UpdateAddrs(p peer.ID, oldTTL time.Duration, newTTL t
 		return
 	}
 
-	for k, a := range amap {
+	for _, a := range amap.m {
 		if oldTTL == a.TTL {
 			if newTTL == 0 {
-				delete(amap, k)
+				amap.Delete(a)
 			} else {
 				a.TTL = newTTL
 				a.Expires = exp
-				amap[k] = a
+				amap.Fix(a)
 			}
 		}
 	}
@@ -341,7 +411,10 @@ func (mab *memoryAddrBook) Addrs(p peer.ID) []ma.Multiaddr {
 	s.RLock()
 	defer s.RUnlock()
 
-	return validAddrs(mab.clock.Now(), s.addrs[p])
+	if _, ok := s.addrs[p]; !ok {
+		return nil
+	}
+	return validAddrs(mab.clock.Now(), s.addrs[p].m)
 }
 
 func validAddrs(now time.Time, amap map[string]*expiringAddr) []ma.Multiaddr {
@@ -366,10 +439,13 @@ func (mab *memoryAddrBook) GetPeerRecord(p peer.ID) *record.Envelope {
 	s.RLock()
 	defer s.RUnlock()
 
+	if _, ok := s.addrs[p]; !ok {
+		return nil
+	}
 	// although the signed record gets garbage collected when all addrs inside it are expired,
 	// we may be in between the expiration time and the GC interval
 	// so, we check to see if we have any valid signed addrs before returning the record
-	if len(validAddrs(mab.clock.Now(), s.addrs[p])) == 0 {
+	if len(validAddrs(mab.clock.Now(), s.addrs[p].m)) == 0 {
 		return nil
 	}
 
@@ -397,10 +473,13 @@ func (mab *memoryAddrBook) AddrStream(ctx context.Context, p peer.ID) <-chan ma.
 	s.RLock()
 	defer s.RUnlock()
 
-	baseaddrslice := s.addrs[p]
-	initial := make([]ma.Multiaddr, 0, len(baseaddrslice))
-	for _, a := range baseaddrslice {
-		initial = append(initial, a.Addr)
+	var initial []ma.Multiaddr
+
+	if baseaddrslice, ok := s.addrs[p]; ok {
+		initial = make([]ma.Multiaddr, 0, len(baseaddrslice.m))
+		for _, a := range baseaddrslice.m {
+			initial = append(initial, a.Addr)
+		}
 	}
 
 	return mab.subManager.AddrStream(ctx, p, initial)
