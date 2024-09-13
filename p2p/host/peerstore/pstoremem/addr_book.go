@@ -163,7 +163,7 @@ func WithClock(clock clock) AddrBookOption {
 // background periodically schedules a gc
 func (mab *memoryAddrBook) background(ctx context.Context) {
 	defer mab.refCount.Done()
-	ticker := time.NewTicker(1 * time.Hour)
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
