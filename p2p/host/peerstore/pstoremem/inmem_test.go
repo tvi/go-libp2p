@@ -1,16 +1,18 @@
 package pstoremem
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 	pstore "github.com/libp2p/go-libp2p/core/peerstore"
+	coretest "github.com/libp2p/go-libp2p/core/test"
 	pt "github.com/libp2p/go-libp2p/p2p/host/peerstore/test"
+	"github.com/libp2p/go-libp2p/p2p/internal/instanttimer"
 	"github.com/multiformats/go-multiaddr"
 
-	mockClock "github.com/benbjohnson/clock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 )
@@ -61,6 +63,39 @@ func TestInMemoryKeyBook(t *testing.T) {
 		require.NoError(t, err)
 		return ps, func() { ps.Close() }
 	})
+}
+
+type mockClock struct {
+	*coretest.MockClock
+}
+
+func (c mockClock) InstantTimer(when time.Time) instanttimer.InstantTimer {
+	return c.MockClock.InstantTimer(when)
+}
+
+func TestGCTimer(t *testing.T) {
+	cl := coretest.NewMockClock()
+	ps, err := NewPeerstore(WithClock(cl))
+	require.NoError(t, err)
+	defer ps.Close()
+	p := pt.RandomPeer(t, 10)
+
+	addrCount := func() int {
+		ps.mu.Lock()
+		defer ps.mu.Unlock()
+		return len(ps.addrs.addrs[p.ID])
+	}
+
+	ps.AddAddr(p.ID, p.Addr[0], time.Second)
+	cl.Add(2 * time.Second)
+
+	// Still there because we run GC at most once per minute.
+	require.Equal(t, 1, addrCount())
+
+	cl.Add(time.Minute)
+	fmt.Println("Time:", cl.Now())
+	require.Equal(t, 0, addrCount())
+
 }
 
 func BenchmarkInMemoryPeerstore(b *testing.B) {

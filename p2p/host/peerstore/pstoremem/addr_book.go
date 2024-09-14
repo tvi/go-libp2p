@@ -11,6 +11,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	pstore "github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/record"
+	"github.com/libp2p/go-libp2p/p2p/internal/instanttimer"
 
 	logging "github.com/ipfs/go-log/v2"
 	ma "github.com/multiformats/go-multiaddr"
@@ -123,16 +124,6 @@ func (pa *peerAddrs) gc(now time.Time) {
 	}
 }
 
-type clock interface {
-	Now() time.Time
-}
-
-type realclock struct{}
-
-func (rc realclock) Now() time.Time {
-	return time.Now()
-}
-
 // memoryAddrBook manages addresses.
 type memoryAddrBook struct {
 	mu sync.RWMutex
@@ -140,11 +131,12 @@ type memoryAddrBook struct {
 	addrs             *peerAddrs
 	signedPeerRecords map[peer.ID]*peerRecordState
 
-	refCount sync.WaitGroup
-	cancel   func()
+	refCount    sync.WaitGroup
+	cancel      func()
+	updateTimer chan struct{}
 
 	subManager *AddrSubManager
-	clock      clock
+	clock      instanttimer.Clock
 }
 
 var _ pstore.AddrBook = (*memoryAddrBook)(nil)
@@ -158,7 +150,8 @@ func NewAddrBook() *memoryAddrBook {
 		signedPeerRecords: make(map[peer.ID]*peerRecordState),
 		subManager:        NewAddrSubManager(),
 		cancel:            cancel,
-		clock:             realclock{},
+		updateTimer:       make(chan struct{}, 1),
+		clock:             instanttimer.RealClock{},
 	}
 	ab.refCount.Add(1)
 	go ab.background(ctx)
@@ -167,25 +160,66 @@ func NewAddrBook() *memoryAddrBook {
 
 type AddrBookOption func(book *memoryAddrBook) error
 
-func WithClock(clock clock) AddrBookOption {
+func WithClock(clock instanttimer.Clock) AddrBookOption {
 	return func(book *memoryAddrBook) error {
 		book.clock = clock
 		return nil
 	}
 }
 
-// background periodically schedules a gc
+// background periodically schedules a gc. Let's us clean up expired addresses
+// in batches.
 func (mab *memoryAddrBook) background(ctx context.Context) {
 	defer mab.refCount.Done()
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
+	const atMostFreq = 1 * time.Minute
+	timer := mab.clock.InstantTimer(mab.clock.Now().Add(atMostFreq))
+	defer timer.Stop()
+	nextRun := mab.clock.Now().Add(atMostFreq)
 
 	for {
 		select {
-		case <-ticker.C:
+		case <-mab.updateTimer:
+			now := mab.clock.Now()
+			mab.mu.RLock()
+			nextExpiry := mab.addrs.NextExpiry()
+			mab.mu.RUnlock()
+
+			if nextExpiry.Before(nextRun) {
+				// The next expiry is sooner than the next scheduled run
+				// but we only want to run at most `atMostFreq`.
+				// So only reset the timer if we are more than `atMostFreq` away
+				if nextRun.Sub(now) > atMostFreq {
+					dur := max(atMostFreq, nextExpiry.Sub(now))
+					if !timer.Stop() {
+						<-timer.Ch()
+					}
+					nextRun = now.Add(dur)
+					timer.Reset(nextRun)
+				}
+			}
+		case <-timer.Ch():
 			mab.gc()
+
+			now := mab.clock.Now()
+			mab.mu.RLock()
+			nextExpiry := mab.addrs.NextExpiry()
+			mab.mu.RUnlock()
+			timeToNextExpiry := nextExpiry.Sub(now)
+			dur := max(atMostFreq, timeToNextExpiry)
+			nextRun = now.Add(dur)
+			timer.Reset(nextRun)
 		case <-ctx.Done():
 			return
+		}
+	}
+}
+
+func (mab *memoryAddrBook) maybeUpdateTimerUnlocked(oldNextExpiry time.Time) {
+	nextExpiry := mab.addrs.NextExpiry()
+	if oldNextExpiry.IsZero() || nextExpiry.Before(oldNextExpiry) {
+		select {
+		case mab.updateTimer <- struct{}{}:
+		default:
 		}
 	}
 }
@@ -276,6 +310,7 @@ func (mab *memoryAddrBook) addAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Du
 }
 
 func (mab *memoryAddrBook) addAddrsUnlocked(p peer.ID, addrs []ma.Multiaddr, ttl time.Duration) {
+	defer mab.maybeUpdateTimerUnlocked(mab.addrs.NextExpiry())
 	// if ttl is zero, exit. nothing to do.
 	if ttl <= 0 {
 		return
@@ -327,6 +362,7 @@ func (mab *memoryAddrBook) SetAddr(p peer.ID, addr ma.Multiaddr, ttl time.Durati
 // SetAddrs sets the ttl on addresses. This clears any TTL there previously.
 // This is used when we receive the best estimate of the validity of an address.
 func (mab *memoryAddrBook) SetAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Duration) {
+	defer mab.maybeUpdateTimerUnlocked(mab.addrs.NextExpiry())
 	mab.mu.Lock()
 	defer mab.mu.Unlock()
 
@@ -433,6 +469,7 @@ func (mab *memoryAddrBook) GetPeerRecord(p peer.ID) *record.Envelope {
 
 // ClearAddrs removes all previously stored addresses
 func (mab *memoryAddrBook) ClearAddrs(p peer.ID) {
+	defer mab.maybeUpdateTimerUnlocked(mab.addrs.NextExpiry())
 	mab.mu.Lock()
 	defer mab.mu.Unlock()
 

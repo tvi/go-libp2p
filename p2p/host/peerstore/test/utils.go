@@ -24,7 +24,7 @@ type peerpair struct {
 	Addr []ma.Multiaddr
 }
 
-func RandomPeer(b *testing.B, addrCount int) *peerpair {
+func RandomPeer(b testing.TB, addrCount int) *peerpair {
 	var (
 		pid   peer.ID
 		err   error
