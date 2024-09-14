@@ -46,8 +46,8 @@ type peerAddrs struct {
 	expiringHeap []*expiringAddr
 }
 
-func newPeerAddrs() *peerAddrs {
-	return &peerAddrs{
+func newPeerAddrs() peerAddrs {
+	return peerAddrs{
 		addrs: make(map[peer.ID]map[string]*expiringAddr),
 	}
 }
@@ -137,7 +137,7 @@ func (rc realclock) Now() time.Time {
 type memoryAddrBook struct {
 	mu sync.RWMutex
 	// TODO bound the number of not connected addresses we store.
-	addrs             *peerAddrs
+	addrs             peerAddrs
 	signedPeerRecords map[peer.ID]*peerRecordState
 
 	refCount sync.WaitGroup
@@ -299,7 +299,7 @@ func (mab *memoryAddrBook) addAddrsUnlocked(p peer.ID, addrs []ma.Multiaddr, ttl
 		if !found {
 			// not found, announce it.
 			entry := &expiringAddr{Addr: addr, Expires: exp, TTL: ttl, Peer: p}
-			heap.Push(mab.addrs, entry)
+			heap.Push(&mab.addrs, entry)
 			mab.subManager.BroadcastAddr(p, addr)
 		} else {
 			// update ttl & exp to whichever is greater between new and existing entry
@@ -355,7 +355,7 @@ func (mab *memoryAddrBook) SetAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Du
 			}
 		} else {
 			if ttl > 0 {
-				heap.Push(mab.addrs, &expiringAddr{Addr: addr, Expires: exp, TTL: ttl, Peer: p})
+				heap.Push(&mab.addrs, &expiringAddr{Addr: addr, Expires: exp, TTL: ttl, Peer: p})
 				mab.subManager.BroadcastAddr(p, addr)
 			}
 		}
