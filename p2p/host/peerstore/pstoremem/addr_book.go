@@ -110,12 +110,15 @@ func (pa *peerAddrs) FindAddr(p peer.ID, addrBytes ma.Multiaddr) (*expiringAddr,
 	return nil, false
 }
 
-func (pa *peerAddrs) Peek() *expiringAddr {
-	return pa.expiringHeap[len(pa.expiringHeap)-1]
+func (pa *peerAddrs) NextExpiry() time.Time {
+	if len(pa.expiringHeap) == 0 {
+		return time.Time{}
+	}
+	return pa.expiringHeap[len(pa.expiringHeap)-1].Expires
 }
 
 func (pa *peerAddrs) gc(now time.Time) {
-	for len(pa.expiringHeap) > 0 && pa.Peek().ExpiredBy(now) {
+	for len(pa.expiringHeap) > 0 && now.After(pa.NextExpiry()) {
 		heap.Pop(pa)
 	}
 }
