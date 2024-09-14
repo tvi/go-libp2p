@@ -16,6 +16,8 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
+var SignedPeerRecordBound = 1_000
+
 var log = logging.Logger("peerstore")
 
 type expiringAddr struct {
@@ -131,9 +133,8 @@ func (rc realclock) Now() time.Time {
 // memoryAddrBook manages addresses.
 type memoryAddrBook struct {
 	mu sync.RWMutex
-	// TODO bound this
-	addrs *peerAddrs
-	// TODO bound this
+	// TODO bound the number of not connected addresses we store.
+	addrs             *peerAddrs
 	signedPeerRecords map[peer.ID]*peerRecordState
 
 	refCount sync.WaitGroup
@@ -227,6 +228,8 @@ func (mab *memoryAddrBook) AddAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Du
 	mab.addAddrs(p, addrs, ttl)
 }
 
+var ErrTooManyRecords = fmt.Errorf("too many signed peer records. Dropping this one")
+
 // ConsumePeerRecord adds addresses from a signed peer.PeerRecord (contained in
 // a record.Envelope), which will expire after the given TTL.
 // See https://godoc.org/github.com/libp2p/go-libp2p/core/peerstore#CertifiedAddrBook for more details.
@@ -246,6 +249,10 @@ func (mab *memoryAddrBook) ConsumePeerRecord(recordEnvelope *record.Envelope, tt
 	// ensure seq is greater than, or equal to, the last received
 	mab.mu.Lock()
 	defer mab.mu.Unlock()
+	if (len(mab.signedPeerRecords)) >= SignedPeerRecordBound {
+		return false, ErrTooManyRecords
+	}
+
 	lastState, found := mab.signedPeerRecords[rec.PeerID]
 	if found && lastState.Seq > rec.Seq {
 		return false, nil
