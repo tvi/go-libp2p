@@ -122,17 +122,9 @@ type AddrBook interface {
 }
 
 // CertifiedAddrBook manages "self-certified" addresses for remote peers.
-// Self-certified addresses are contained in peer.PeerRecords
-// which are wrapped in a record.Envelope and signed by the peer
-// to whom they belong.
-//
-// Certified addresses (CA) are generally more secure than uncertified
-// addresses (UA). Consequently, CAs beat and displace UAs. When the
-// peerstore learns CAs for a peer, it will reject UAs for the same peer
-// (as long as the former haven't expired).
-// Furthermore, peer records act like sequenced snapshots of CAs. Therefore,
-// processing a peer record that's newer than the last one seen overwrites
-// all addresses with the incoming ones.
+// Self-certified addresses are contained in signed peer.PeerRecords.
+// Certified addresses are generally more secure than uncertified
+// addresses.
 //
 // This interface is most useful when combined with AddrBook.
 // To test whether a given AddrBook / Peerstore implementation supports
@@ -143,36 +135,23 @@ type AddrBook interface {
 //	    cab.ConsumePeerRecord(signedPeerRecord, aTTL)
 //	}
 type CertifiedAddrBook interface {
-	// ConsumePeerRecord adds addresses from a signed peer.PeerRecord (contained in
-	// a record.Envelope), which will expire after the given TTL.
+	// ConsumePeerRecord adds addresses from a signed peer.PeerRecord, which will expire when
+	// all addresses associated with the peer have expired. The addresses in provided signed
+	// peer.PeerRecord are expired after `ttl` duration.
 	//
-	// The 'accepted' return value indicates that the record was successfully processed
-	// and integrated into the CertifiedAddrBook state. If 'accepted' is false but no
-	// error is returned, it means that the record was ignored, most likely because
-	// a newer record exists for the same peer.
+	// The `accepted` return value indicates that the record was successfully processed. If
+	// `accepted` is false but no error is returned, it means that the record was ignored, most
+	// likely because a newer record exists for the same peer.
 	//
-	// Signed records added via this method will be stored without
-	// alteration as long as the address TTLs remain valid. The Envelopes
-	// containing the PeerRecords can be retrieved by calling GetPeerRecord(peerID).
+	// If the signed peer.PeerRecord belongs to a peer that already has certified addresses in
+	// the CertifiedAddrBook, and if the new record has a higher sequence number than the
+	// existing record, the new addresses will be added and the older ones will be kept
+	// unchanged. Attempting to add a peer record with a sequence number that's lower than an
+	// existing record will not result in an error, but the record will be ignored, and the
+	// `accepted` return value will be false.
 	//
-	// If the signed PeerRecord belongs to a peer that already has certified
-	// addresses in the CertifiedAddrBook, the new addresses will replace the
-	// older ones, if the new record has a higher sequence number than the
-	// existing record. Attempting to add a peer record with a
-	// sequence number that's <= an existing record for the same peer will not
-	// result in an error, but the record will be ignored, and the 'accepted'
-	// bool return value will be false.
-	//
-	// If the CertifiedAddrBook is also an AddrBook (which is most likely the case),
-	// adding certified addresses for a peer will *replace* any
-	// existing non-certified addresses for that peer, and only the certified
-	// addresses will be returned from AddrBook.Addrs thereafter.
-	//
-	// Likewise, once certified addresses have been added for a given peer,
-	// any non-certified addresses added via AddrBook.AddAddrs or
-	// AddrBook.SetAddrs will be ignored. AddrBook.SetAddrs may still be used
-	// to update the TTL of certified addresses that have previously been
-	// added via ConsumePeerRecord.
+	// The Envelopes containing the PeerRecords can be retrieved by calling
+	// GetPeerRecord(peerID).
 	ConsumePeerRecord(s *record.Envelope, ttl time.Duration) (accepted bool, err error)
 
 	// GetPeerRecord returns an Envelope containing a PeerRecord for the
