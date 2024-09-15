@@ -175,7 +175,7 @@ func GetCertifiedAddrBook(ab AddrBook) (cab CertifiedAddrBook, ok bool) {
 
 // KeyBook tracks the keys of Peers.
 type KeyBook interface {
-	// PubKey stores the public key of a peer.
+	// PubKey returns the public key of a peer.
 	PubKey(peer.ID) ic.PubKey
 
 	// AddPubKey stores the public key of a peer.

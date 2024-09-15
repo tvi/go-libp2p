@@ -71,11 +71,9 @@ func (pa *peerAddrs) Push(x any) {
 	pa.expiringHeap = append(pa.expiringHeap, a)
 }
 func (pa *peerAddrs) Pop() any {
-	old := pa.expiringHeap
-	n := len(old)
-	a := old[n-1]
+	a := pa.expiringHeap[len(pa.expiringHeap)-1]
 	a.heapIndex = -1
-	pa.expiringHeap = old[0 : n-1]
+	pa.expiringHeap = pa.expiringHeap[0 : len(pa.expiringHeap)-1]
 
 	if m, ok := pa.Addrs[a.Peer]; ok {
 		delete(m, string(a.Addr.Bytes()))
@@ -114,11 +112,12 @@ func (pa *peerAddrs) NextExpiry() time.Time {
 	if len(pa.expiringHeap) == 0 {
 		return time.Time{}
 	}
-	return pa.expiringHeap[len(pa.expiringHeap)-1].Expires
+	return pa.expiringHeap[0].Expires
 }
 
 func (pa *peerAddrs) PopIfExpired(now time.Time) (*expiringAddr, bool) {
-	if len(pa.expiringHeap) > 0 && now.After(pa.NextExpiry()) {
+	// Use !Before and not After to ensure that we expire *at* now and not just after now.
+	if len(pa.expiringHeap) > 0 && !now.Before(pa.NextExpiry()) {
 		a := heap.Pop(pa)
 		return a.(*expiringAddr), true
 	}
