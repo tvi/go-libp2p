@@ -121,12 +121,10 @@ type AddrBook interface {
 	PeersWithAddrs() peer.IDSlice
 }
 
-// CertifiedAddrBook manages "self-certified" addresses for remote peers.
-// Self-certified addresses are contained in signed peer.PeerRecords.
-// Certified addresses are generally more secure than uncertified
-// addresses.
+// CertifiedAddrBook manages signed peer records and "self-certified" addresses
+// contained within them.
+// Use this interface with an `AddrBook`.
 //
-// This interface is most useful when combined with AddrBook.
 // To test whether a given AddrBook / Peerstore implementation supports
 // certified addresses, callers should use the GetCertifiedAddrBook helper or
 // type-assert on the CertifiedAddrBook interface:
@@ -135,28 +133,28 @@ type AddrBook interface {
 //	    cab.ConsumePeerRecord(signedPeerRecord, aTTL)
 //	}
 type CertifiedAddrBook interface {
-	// ConsumePeerRecord adds addresses from a signed peer.PeerRecord, which will expire when
-	// all addresses associated with the peer have expired. The addresses in provided signed
-	// peer.PeerRecord are expired after `ttl` duration.
+	// ConsumePeerRecord stores a signed peer record and the contained addresses for
+	// for ttl duration.
+	// The addresses contained in the signed peer record will expire after ttl. If any
+	// address is already present in the peer store, it'll expire at max of existing ttl and
+	// provided ttl.
+	// The signed peer record itself will be expired when all the addresses associated with the peer,
+	// self-certified or not, are removed from the AddrBook.
+	// To delete the signed peer record, use `AddrBook.UpdateAddrs`,`AddrBook.SetAddrs`, or
+	// `AddrBook.ClearAddrs` with ttl 0.
+	// Note: Future calls to ConsumePeerRecord will not expire self-certified addresses from the
+	// previous calls.
 	//
 	// The `accepted` return value indicates that the record was successfully processed. If
 	// `accepted` is false but no error is returned, it means that the record was ignored, most
-	// likely because a newer record exists for the same peer.
+	// likely because a newer record exists for the same peer with a greater seq value.
 	//
-	// If the signed peer.PeerRecord belongs to a peer that already has certified addresses in
-	// the CertifiedAddrBook, and if the new record has a higher sequence number than the
-	// existing record, the new addresses will be added and the older ones will be kept
-	// unchanged. Attempting to add a peer record with a sequence number that's lower than an
-	// existing record will not result in an error, but the record will be ignored, and the
-	// `accepted` return value will be false.
-	//
-	// The Envelopes containing the PeerRecords can be retrieved by calling
+	// The Envelopes containing the signed peer records can be retrieved by calling
 	// GetPeerRecord(peerID).
 	ConsumePeerRecord(s *record.Envelope, ttl time.Duration) (accepted bool, err error)
 
-	// GetPeerRecord returns an Envelope containing a PeerRecord for the
-	// given peer id, if one exists.
-	// Returns nil if no signed PeerRecord exists for the peer.
+	// GetPeerRecord returns an Envelope containing a peer record for the
+	// peer, or nil if no record exists.
 	GetPeerRecord(p peer.ID) *record.Envelope
 }
 
