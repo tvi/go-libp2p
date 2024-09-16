@@ -21,16 +21,16 @@ var SignedPeerRecordBound = 100_000
 var log = logging.Logger("peerstore")
 
 type expiringAddr struct {
-	Addr    ma.Multiaddr
-	TTL     time.Duration
-	Expires time.Time
-	Peer    peer.ID
+	Addr   ma.Multiaddr
+	TTL    time.Duration
+	Expiry time.Time
+	Peer   peer.ID
 	// to sort by expiry time
 	heapIndex int
 }
 
 func (e *expiringAddr) ExpiredBy(t time.Time) bool {
-	return !t.Before(e.Expires)
+	return !t.Before(e.Expiry)
 }
 
 type peerRecordState struct {
@@ -54,7 +54,7 @@ func newPeerAddrs() peerAddrs {
 
 func (pa *peerAddrs) Len() int { return len(pa.expiringHeap) }
 func (pa *peerAddrs) Less(i, j int) bool {
-	return pa.expiringHeap[i].Expires.Before(pa.expiringHeap[j].Expires)
+	return pa.expiringHeap[i].Expiry.Before(pa.expiringHeap[j].Expiry)
 }
 func (pa *peerAddrs) Swap(i, j int) {
 	pa.expiringHeap[i], pa.expiringHeap[j] = pa.expiringHeap[j], pa.expiringHeap[i]
@@ -81,7 +81,6 @@ func (pa *peerAddrs) Pop() any {
 			delete(pa.Addrs, a.Peer)
 		}
 	}
-
 	return a
 }
 
@@ -112,11 +111,11 @@ func (pa *peerAddrs) NextExpiry() time.Time {
 	if len(pa.expiringHeap) == 0 {
 		return time.Time{}
 	}
-	return pa.expiringHeap[0].Expires
+	return pa.expiringHeap[0].Expiry
 }
 
 func (pa *peerAddrs) PopIfExpired(now time.Time) (*expiringAddr, bool) {
-	// Use !Before and not After to ensure that we expire *at* now and not just after now.
+	// Use `!Before` instead of `After` to ensure that we expire *at* now, and not *just after now*.
 	if len(pa.expiringHeap) > 0 && !now.Before(pa.NextExpiry()) {
 		a := heap.Pop(pa)
 		return a.(*expiringAddr), true
@@ -304,7 +303,7 @@ func (mab *memoryAddrBook) addAddrsUnlocked(p peer.ID, addrs []ma.Multiaddr, ttl
 		a, found := mab.addrs.FindAddr(p, addr)
 		if !found {
 			// not found, announce it.
-			entry := &expiringAddr{Addr: addr, Expires: exp, TTL: ttl, Peer: p}
+			entry := &expiringAddr{Addr: addr, Expiry: exp, TTL: ttl, Peer: p}
 			heap.Push(&mab.addrs, entry)
 			mab.subManager.BroadcastAddr(p, addr)
 		} else {
@@ -314,9 +313,9 @@ func (mab *memoryAddrBook) addAddrsUnlocked(p peer.ID, addrs []ma.Multiaddr, ttl
 				changed = true
 				a.TTL = ttl
 			}
-			if exp.After(a.Expires) {
+			if exp.After(a.Expiry) {
 				changed = true
-				a.Expires = exp
+				a.Expiry = exp
 			}
 			if changed {
 				mab.addrs.Fix(a)
@@ -353,7 +352,7 @@ func (mab *memoryAddrBook) SetAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Du
 		if a, found := mab.addrs.FindAddr(p, addr); found {
 			if ttl > 0 {
 				a.Addr = addr
-				a.Expires = exp
+				a.Expiry = exp
 				a.TTL = ttl
 				mab.addrs.Fix(a)
 				mab.subManager.BroadcastAddr(p, addr)
@@ -362,7 +361,7 @@ func (mab *memoryAddrBook) SetAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Du
 			}
 		} else {
 			if ttl > 0 {
-				heap.Push(&mab.addrs, &expiringAddr{Addr: addr, Expires: exp, TTL: ttl, Peer: p})
+				heap.Push(&mab.addrs, &expiringAddr{Addr: addr, Expiry: exp, TTL: ttl, Peer: p})
 				mab.subManager.BroadcastAddr(p, addr)
 			}
 		}
@@ -384,7 +383,7 @@ func (mab *memoryAddrBook) UpdateAddrs(p peer.ID, oldTTL time.Duration, newTTL t
 				mab.addrs.Delete(a)
 			} else {
 				a.TTL = newTTL
-				a.Expires = exp
+				a.Expiry = exp
 				mab.addrs.Fix(a)
 			}
 		}
@@ -411,7 +410,6 @@ func validAddrs(now time.Time, amap map[string]*expiringAddr) []ma.Multiaddr {
 			good = append(good, m.Addr)
 		}
 	}
-
 	return good
 }
 

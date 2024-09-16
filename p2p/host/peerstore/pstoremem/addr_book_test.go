@@ -22,8 +22,8 @@ func TestPeerAddrsNextExpiry(t *testing.T) {
 	// t1 is before t2
 	t1 := time.Time{}.Add(1 * time.Second)
 	t2 := time.Time{}.Add(2 * time.Second)
-	heap.Push(pa, &expiringAddr{Addr: a1, Expires: t1, TTL: 10 * time.Second, Peer: "p1"})
-	heap.Push(pa, &expiringAddr{Addr: a2, Expires: t2, TTL: 10 * time.Second, Peer: "p2"})
+	heap.Push(pa, &expiringAddr{Addr: a1, Expiry: t1, TTL: 10 * time.Second, Peer: "p1"})
+	heap.Push(pa, &expiringAddr{Addr: a2, Expiry: t2, TTL: 10 * time.Second, Peer: "p2"})
 
 	if pa.NextExpiry() != t1 {
 		t.Fatal("expiry should be set to t1, got", pa.NextExpiry())
@@ -36,7 +36,7 @@ func peerAddrsInput(n int) []*expiringAddr {
 		a := ma.StringCast(fmt.Sprintf("/ip4/1.2.3.4/udp/%d/quic-v1", i))
 		e := time.Time{}.Add(time.Duration(i) * time.Second) // expiries are in reverse order
 		p := peer.ID(fmt.Sprintf("p%d", i))
-		expiringAddrs[i] = &expiringAddr{Addr: a, Expires: e, TTL: 10 * time.Second, Peer: p}
+		expiringAddrs[i] = &expiringAddr{Addr: a, Expiry: e, TTL: 10 * time.Second, Peer: p}
 	}
 	return expiringAddrs
 }
@@ -52,11 +52,11 @@ func TestPeerAddrsHeapProperty(t *testing.T) {
 	}
 
 	for i := 0; i < N; i++ {
-		ea, ok := pa.PopIfExpired(expiringAddrs[i].Expires)
+		ea, ok := pa.PopIfExpired(expiringAddrs[i].Expiry)
 		require.True(t, ok, "pos: %d", i)
 		require.Equal(t, ea.Addr, expiringAddrs[i].Addr)
 
-		ea, ok = pa.PopIfExpired(expiringAddrs[i].Expires)
+		ea, ok = pa.PopIfExpired(expiringAddrs[i].Expiry)
 		require.False(t, ok)
 		require.Nil(t, ea)
 	}
@@ -78,7 +78,7 @@ func TestPeerAddrsHeapPropertyDeletions(t *testing.T) {
 	}
 
 	for i := 0; i < N; i++ {
-		ea, ok := pa.PopIfExpired(expiringAddrs[i].Expires)
+		ea, ok := pa.PopIfExpired(expiringAddrs[i].Expiry)
 		if i%3 == 0 {
 			require.False(t, ok)
 			require.Nil(t, ea)
@@ -87,7 +87,7 @@ func TestPeerAddrsHeapPropertyDeletions(t *testing.T) {
 			require.Equal(t, ea.Addr, expiringAddrs[i].Addr)
 		}
 
-		ea, ok = pa.PopIfExpired(expiringAddrs[i].Expires)
+		ea, ok = pa.PopIfExpired(expiringAddrs[i].Expiry)
 		require.False(t, ok)
 		require.Nil(t, ea)
 	}
@@ -106,7 +106,7 @@ func TestPeerAddrsHeapPropertyUpdates(t *testing.T) {
 	// update every 3rd element to expire at the end
 	var endElements []ma.Multiaddr
 	for i := 0; i < N; i += 3 {
-		expiringAddrs[i].Expires = time.Time{}.Add(1000_000 * time.Second)
+		expiringAddrs[i].Expiry = time.Time{}.Add(1000_000 * time.Second)
 		pa.Fix(expiringAddrs[i])
 		endElements = append(endElements, expiringAddrs[i].Addr)
 	}
@@ -115,11 +115,11 @@ func TestPeerAddrsHeapPropertyUpdates(t *testing.T) {
 		if i%3 == 0 {
 			continue // skip the elements at the end
 		}
-		ea, ok := pa.PopIfExpired(expiringAddrs[i].Expires)
+		ea, ok := pa.PopIfExpired(expiringAddrs[i].Expiry)
 		require.True(t, ok, "pos: %d", i)
 		require.Equal(t, ea.Addr, expiringAddrs[i].Addr)
 
-		ea, ok = pa.PopIfExpired(expiringAddrs[i].Expires)
+		ea, ok = pa.PopIfExpired(expiringAddrs[i].Expiry)
 		require.False(t, ok)
 		require.Nil(t, ea)
 	}
@@ -144,7 +144,7 @@ func TestPeerAddrsExpiry(t *testing.T) {
 		const N = 5
 		expiringAddrs := peerAddrsInput(N)
 		for i := 0; i < N; i++ {
-			expiringAddrs[i].Expires = time.Time{}.Add(time.Duration(1+rand.Intn(N)) * time.Second)
+			expiringAddrs[i].Expiry = time.Time{}.Add(time.Duration(1+rand.Intn(N)) * time.Second)
 		}
 		for i := 0; i < N; i++ {
 			heap.Push(pa, expiringAddrs[i])
@@ -153,7 +153,7 @@ func TestPeerAddrsExpiry(t *testing.T) {
 		expiry := time.Time{}.Add(time.Duration(1+rand.Intn(N)) * time.Second)
 		expected := []ma.Multiaddr{}
 		for i := 0; i < N; i++ {
-			if !expiry.Before(expiringAddrs[i].Expires) {
+			if !expiry.Before(expiringAddrs[i].Expiry) {
 				expected = append(expected, expiringAddrs[i].Addr)
 			}
 		}
@@ -167,7 +167,7 @@ func TestPeerAddrsExpiry(t *testing.T) {
 		}
 		expiries := []int{}
 		for i := 0; i < N; i++ {
-			expiries = append(expiries, expiringAddrs[i].Expires.Second())
+			expiries = append(expiries, expiringAddrs[i].Expiry.Second())
 		}
 		require.ElementsMatch(t, expected, got, "failed for input: element expiries: %v, expiry: %v", expiries, expiry.Second())
 	}
