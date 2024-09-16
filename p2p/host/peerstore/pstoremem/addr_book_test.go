@@ -3,6 +3,7 @@ package pstoremem
 import (
 	"container/heap"
 	"fmt"
+	"math/rand"
 	"slices"
 	"testing"
 	"time"
@@ -29,26 +30,33 @@ func TestPeerAddrsNextExpiry(t *testing.T) {
 	}
 }
 
+func peerAddrsInput(n int) []*expiringAddr {
+	expiringAddrs := make([]*expiringAddr, n)
+	for i := 0; i < n; i++ {
+		a := ma.StringCast(fmt.Sprintf("/ip4/1.2.3.4/udp/%d/quic-v1", i))
+		e := time.Time{}.Add(time.Duration(i) * time.Second) // expiries are in reverse order
+		p := peer.ID(fmt.Sprintf("p%d", i))
+		expiringAddrs[i] = &expiringAddr{Addr: a, Expires: e, TTL: 10 * time.Second, Peer: p}
+	}
+	return expiringAddrs
+}
+
 func TestPeerAddrsHeapProperty(t *testing.T) {
 	paa := newPeerAddrs()
 	pa := &paa
-	addrs := []ma.Multiaddr{}
-	expiries := []time.Time{}
 
 	const N = 10000
+	expiringAddrs := peerAddrsInput(N)
 	for i := 0; i < N; i++ {
-		addrs = append(addrs, ma.StringCast(fmt.Sprintf("/ip4/1.2.3.4/udp/%d/quic-v1", i)))
-		expiries = append(expiries, time.Time{}.Add(time.Duration(10000-i)*time.Second)) // expiries are in reverse order
-		pid := peer.ID(fmt.Sprintf("p%d", i))
-		heap.Push(pa, &expiringAddr{Addr: addrs[i], Expires: expiries[i], TTL: 10 * time.Second, Peer: pid})
+		heap.Push(pa, expiringAddrs[i])
 	}
 
-	for i := N - 1; i >= 0; i-- {
-		ea, ok := pa.PopIfExpired(expiries[i])
-		require.True(t, ok)
-		require.Equal(t, ea.Addr, addrs[i])
+	for i := 0; i < N; i++ {
+		ea, ok := pa.PopIfExpired(expiringAddrs[i].Expires)
+		require.True(t, ok, "pos: %d", i)
+		require.Equal(t, ea.Addr, expiringAddrs[i].Addr)
 
-		ea, ok = pa.PopIfExpired(expiries[i])
+		ea, ok = pa.PopIfExpired(expiringAddrs[i].Expires)
 		require.False(t, ok)
 		require.Nil(t, ea)
 	}
@@ -57,14 +65,10 @@ func TestPeerAddrsHeapProperty(t *testing.T) {
 func TestPeerAddrsHeapPropertyDeletions(t *testing.T) {
 	paa := newPeerAddrs()
 	pa := &paa
-	expiringAddrs := []*expiringAddr{}
 
 	const N = 10000
+	expiringAddrs := peerAddrsInput(N)
 	for i := 0; i < N; i++ {
-		a := ma.StringCast(fmt.Sprintf("/ip4/1.2.3.4/udp/%d/quic-v1", i))
-		e := time.Time{}.Add(time.Duration(10000-i) * time.Second) // expiries are in reverse order
-		p := peer.ID(fmt.Sprintf("p%d", i))
-		expiringAddrs = append(expiringAddrs, &expiringAddr{Addr: a, Expires: e, TTL: 10 * time.Second, Peer: p})
 		heap.Push(pa, expiringAddrs[i])
 	}
 
@@ -73,7 +77,7 @@ func TestPeerAddrsHeapPropertyDeletions(t *testing.T) {
 		paa.Delete(expiringAddrs[i])
 	}
 
-	for i := N - 1; i >= 0; i-- {
+	for i := 0; i < N; i++ {
 		ea, ok := pa.PopIfExpired(expiringAddrs[i].Expires)
 		if i%3 == 0 {
 			require.False(t, ok)
@@ -92,14 +96,10 @@ func TestPeerAddrsHeapPropertyDeletions(t *testing.T) {
 func TestPeerAddrsHeapPropertyUpdates(t *testing.T) {
 	paa := newPeerAddrs()
 	pa := &paa
-	expiringAddrs := []*expiringAddr{}
 
 	const N = 10000
+	expiringAddrs := peerAddrsInput(N)
 	for i := 0; i < N; i++ {
-		a := ma.StringCast(fmt.Sprintf("/ip4/1.2.3.4/udp/%d/quic-v1", i))
-		e := time.Time{}.Add(time.Duration(N-i) * time.Second) // expiries are in reverse order
-		p := peer.ID(fmt.Sprintf("p%d", i))
-		expiringAddrs = append(expiringAddrs, &expiringAddr{Addr: a, Expires: e, TTL: 10 * time.Second, Peer: p})
 		heap.Push(pa, expiringAddrs[i])
 	}
 
@@ -111,7 +111,7 @@ func TestPeerAddrsHeapPropertyUpdates(t *testing.T) {
 		endElements = append(endElements, expiringAddrs[i].Addr)
 	}
 
-	for i := N - 1; i >= 0; i-- {
+	for i := 0; i < N; i++ {
 		if i%3 == 0 {
 			continue // skip the elements at the end
 		}
@@ -129,5 +129,46 @@ func TestPeerAddrsHeapPropertyUpdates(t *testing.T) {
 		require.True(t, ok)
 		require.Contains(t, endElements, ea.Addr)
 		endElements = slices.DeleteFunc(endElements, func(a ma.Multiaddr) bool { return ea.Addr.Equal(a) })
+	}
+}
+
+// TestPeerAddrsExpiry tests for multiple element expiry with PopIfExpired.
+func TestPeerAddrsExpiry(t *testing.T) {
+	const T = 100_000
+	for x := 0; x < T; x++ {
+		paa := newPeerAddrs()
+		pa := &paa
+		// Try a lot of random inputs.
+		// T > 5*((5^5)*5) (=15k)
+		// So this should test for all possible 5 element inputs.
+		const N = 5
+		expiringAddrs := peerAddrsInput(N)
+		for i := 0; i < N; i++ {
+			expiringAddrs[i].Expires = time.Time{}.Add(time.Duration(1+rand.Intn(N)) * time.Second)
+		}
+		for i := 0; i < N; i++ {
+			heap.Push(pa, expiringAddrs[i])
+		}
+
+		expiry := time.Time{}.Add(time.Duration(1+rand.Intn(N)) * time.Second)
+		expected := []ma.Multiaddr{}
+		for i := 0; i < N; i++ {
+			if !expiry.Before(expiringAddrs[i].Expires) {
+				expected = append(expected, expiringAddrs[i].Addr)
+			}
+		}
+		got := []ma.Multiaddr{}
+		for {
+			ea, ok := pa.PopIfExpired(expiry)
+			if !ok {
+				break
+			}
+			got = append(got, ea.Addr)
+		}
+		expiries := []int{}
+		for i := 0; i < N; i++ {
+			expiries = append(expiries, expiringAddrs[i].Expires.Second())
+		}
+		require.ElementsMatch(t, expected, got, "failed for input: element expiries: %v, expiry: %v", expiries, expiry.Second())
 	}
 }
