@@ -33,8 +33,9 @@ func TestPeerAddrsNextExpiry(t *testing.T) {
 func peerAddrsInput(n int) []*expiringAddr {
 	expiringAddrs := make([]*expiringAddr, n)
 	for i := 0; i < n; i++ {
-		a := ma.StringCast(fmt.Sprintf("/ip4/1.2.3.4/udp/%d/quic-v1", i))
-		e := time.Time{}.Add(time.Duration(i) * time.Second) // expiries are in reverse order
+		port := i % 65535
+		a := ma.StringCast(fmt.Sprintf("/ip4/1.2.3.4/udp/%d/quic-v1", port))
+		e := time.Time{}.Add(time.Duration(i) * time.Second)
 		p := peer.ID(fmt.Sprintf("p%d", i))
 		expiringAddrs[i] = &expiringAddr{Addr: a, Expiry: e, TTL: 10 * time.Second, Peer: p}
 	}
@@ -171,4 +172,29 @@ func TestPeerAddrsExpiry(t *testing.T) {
 		}
 		require.ElementsMatch(t, expected, got, "failed for input: element expiries: %v, expiry: %v", expiries, expiry.Second())
 	}
+}
+
+func BenchmarkPeerAddrs(b *testing.B) {
+	sizes := [...]int{1, 10, 100, 1000, 10_000, 100_000, 1000_000}
+	for _, sz := range sizes {
+		b.Run(fmt.Sprintf("%d", sz), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				paa := newPeerAddrs()
+				pa := &paa
+				expiringAddrs := peerAddrsInput(sz)
+				for i := 0; i < sz; i++ {
+					heap.Push(pa, expiringAddrs[i])
+				}
+				b.StartTimer()
+				for {
+					_, ok := pa.PopIfExpired(expiringAddrs[len(expiringAddrs)-1].Expiry)
+					if !ok {
+						break
+					}
+				}
+			}
+		})
+	}
+
 }

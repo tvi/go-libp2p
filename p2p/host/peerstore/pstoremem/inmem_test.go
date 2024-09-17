@@ -93,20 +93,22 @@ func BenchmarkGC(b *testing.B) {
 	require.NoError(b, err)
 	defer ps.Close()
 
-	peerCount := 10_000
+	peerCount := 100_000
 	addrsPerPeer := 32
-
-	for i := 0; i < peerCount; i++ {
-		id := peer.ID(strconv.Itoa(i))
-		addrs := make([]multiaddr.Multiaddr, addrsPerPeer)
-		for j := 0; j < addrsPerPeer; j++ {
-			addrs[j] = multiaddr.StringCast("/ip4/1.2.3.4/tcp/" + strconv.Itoa(j))
-		}
-		ps.AddAddrs(id, addrs, 24*time.Hour)
-	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		for i := 0; i < peerCount; i++ {
+			id := peer.ID(strconv.Itoa(i))
+			addrs := make([]multiaddr.Multiaddr, addrsPerPeer)
+			for j := 0; j < addrsPerPeer; j++ {
+				addrs[j] = multiaddr.StringCast("/ip4/1.2.3.4/tcp/" + strconv.Itoa(j))
+			}
+			ps.AddAddrs(id, addrs, 24*time.Hour)
+		}
+		clock.Add(25 * time.Hour)
+		b.StartTimer()
 		ps.gc()
 	}
 }
