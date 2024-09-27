@@ -421,7 +421,6 @@ func (ids *idService) IdentifyWait(c network.Conn) <-chan struct{} {
 	}
 	// First call to IdentifyWait for this connection. Create the channel.
 	e.IdentifyWaitChan = make(chan struct{})
-	ids.conns[c] = e
 
 	// Spawn an identify. The connection may actually be closed
 	// already, but that doesn't really matter. We'll fail to open a
