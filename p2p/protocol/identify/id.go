@@ -155,7 +155,7 @@ type idService struct {
 	// The conns map contains all connections we're currently handling.
 	// Connections are inserted as soon as they're available in the swarm
 	// Connections are removed from the map when the connection disconnects.
-	conns map[network.Conn]entry
+	conns map[network.Conn]*entry
 
 	addrMu sync.Mutex
 
@@ -201,7 +201,7 @@ func NewIDService(h host.Host, opts ...Option) (*idService, error) {
 		ProtocolVersion:         cfg.protocolVersion,
 		ctx:                     ctx,
 		ctxCancel:               cancel,
-		conns:                   make(map[network.Conn]entry),
+		conns:                   make(map[network.Conn]*entry),
 		disableSignedPeerRecord: cfg.disableSignedPeerRecord,
 		setupCompleted:          make(chan struct{}),
 		metricsTracer:           cfg.metricsTracer,
@@ -412,7 +412,7 @@ func (ids *idService) IdentifyWait(c network.Conn) <-chan struct{} {
 			close(ch)
 			return ch
 		} else {
-			ids.addConnWithLock(c)
+			e = ids.addConnWithLock(c)
 		}
 	}
 
@@ -986,12 +986,14 @@ func HasConsistentTransport(a ma.Multiaddr, green []ma.Multiaddr) bool {
 }
 
 // addConnWithLock assuems caller holds the connsMu lock
-func (ids *idService) addConnWithLock(c network.Conn) {
-	_, found := ids.conns[c]
+func (ids *idService) addConnWithLock(c network.Conn) *entry {
+	e, found := ids.conns[c]
 	if !found {
 		<-ids.setupCompleted
-		ids.conns[c] = entry{}
+		e = &entry{}
+		ids.conns[c] = e
 	}
+	return e
 }
 
 func signedPeerRecordFromMessage(msg *pb.Identify) (*record.Envelope, error) {
