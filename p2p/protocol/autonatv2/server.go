@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -88,6 +90,13 @@ func (as *server) Close() {
 
 // handleDialRequest is the dial-request protocol stream handler
 func (as *server) handleDialRequest(s network.Stream) {
+	defer func() {
+		if rerr := recover(); rerr != nil {
+			fmt.Fprintf(os.Stderr, "caught panic: %s\n%s\n", rerr, debug.Stack())
+		}
+	}()
+
+	log.Debugf("received dial-request from: %s, addr: %s", s.Conn().RemotePeer(), s.Conn().RemoteMultiaddr())
 	evt := as.serveDialRequest(s)
 	log.Debugf("completed dial-request from %s, response status: %s, dial status: %s, err: %s",
 		s.Conn().RemotePeer(), evt.ResponseStatus, evt.DialStatus, evt.Error)
@@ -96,7 +105,7 @@ func (as *server) handleDialRequest(s network.Stream) {
 	}
 }
 
-func (as *server) serveDialRequest(s network.Stream) EventDialRequestCompleted {
+func (as *server) serveDialRequest(s network.Stream) (result EventDialRequestCompleted) {
 	if err := s.Scope().SetService(ServiceName); err != nil {
 		s.Reset()
 		log.Debugf("failed to attach stream to %s service: %w", ServiceName, err)
