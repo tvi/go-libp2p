@@ -867,3 +867,29 @@ func TestConnClosedWhenRemoteCloses(t *testing.T) {
 		})
 	}
 }
+
+func TestConnMatchingAddress(t *testing.T) {
+	for _, tc := range transportsToTest {
+		t.Run(tc.Name, func(t *testing.T) {
+			server := tc.HostGenerator(t, TransportTestCaseOpts{})
+			client1 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true})
+			client2 := tc.HostGenerator(t, TransportTestCaseOpts{NoListen: true})
+			defer server.Close()
+			defer client1.Close()
+			defer client2.Close()
+
+			client1.Peerstore().AddAddrs(server.ID(), server.Addrs(), peerstore.PermanentAddrTTL)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := client1.Connect(ctx, peer.AddrInfo{ID: server.ID(), Addrs: server.Addrs()})
+			require.NoError(t, err)
+
+			client1Conns := client1.Network().ConnsToPeer(server.ID())
+			require.Equal(t, 1, len(client1Conns))
+			remoteMA := client1Conns[0].RemoteMultiaddr()
+
+			err = client2.Connect(ctx, peer.AddrInfo{ID: server.ID(), Addrs: []ma.Multiaddr{remoteMA}})
+			require.NoError(t, err)
+		})
+	}
+}
