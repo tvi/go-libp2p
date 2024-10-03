@@ -254,6 +254,7 @@ func (ac *client) handleDialBack(s network.Stream) {
 		if rerr := recover(); rerr != nil {
 			fmt.Fprintf(os.Stderr, "caught panic: %s\n%s\n", rerr, debug.Stack())
 		}
+		s.Reset()
 	}()
 
 	if err := s.Scope().SetService(ServiceName); err != nil {
