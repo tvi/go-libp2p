@@ -53,7 +53,7 @@ func DefaultResources() Resources {
 		MaxCircuits:     16,
 		BufferSize:      2048,
 
-		MaxReservationsPerPeer: 4,
+		MaxReservationsPerPeer: 1,
 		MaxReservationsPerIP:   8,
 		MaxReservationsPerASN:  32,
 	}

@@ -62,10 +62,10 @@ func TestConstraints(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := c.Reserve(p2, ipAddr, expiry); err != errTooManyReservationsForIP {
-			t.Fatalf("expected to run into total reservation limit, got %v", err)
+			t.Fatalf("expected to run into IP reservation limit as this IP has already been reserved by a different peer, got %v", err)
 		}
 		if err := c.Reserve(p, randomIPv4Addr(t), expiry); err != nil {
-			t.Fatalf("expected to update reservation for peer, got %v", err)
+			t.Fatalf("expected to update existing reservation for peer, got %v", err)
 		}
 		if err := c.Reserve(p2, ipAddr, expiry); err != nil {
 			t.Fatalf("expected reservation for different peer to be possible, got %v", err)

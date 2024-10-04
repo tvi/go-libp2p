@@ -45,8 +45,8 @@ func newConstraints(rc *Resources) *constraints {
 	}
 }
 
-// AddReservation adds a reservation for a given peer with a given multiaddr.
-// If adding this reservation violates IP constraints, an error is returned.
+// Reserve adds a reservation for a given peer with a given multiaddr.
+// If adding this reservation violates IP, ASN, or total reservation constraints, an error is returned.
 func (c *constraints) Reserve(p peer.ID, a ma.Multiaddr, expiry time.Time) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
