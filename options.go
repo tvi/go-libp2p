@@ -643,3 +643,10 @@ func WithFxOption(opts ...fx.Option) Option {
 		return nil
 	}
 }
+
+func ShareTCPListener() Option {
+	return func(cfg *Config) error {
+		cfg.ShareTCPListener = true
+		return nil
+	}
+}
