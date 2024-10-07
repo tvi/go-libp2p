@@ -85,6 +85,16 @@ type Resolver interface {
 	Resolve(ctx context.Context, maddr ma.Multiaddr) ([]ma.Multiaddr, error)
 }
 
+// SkipResolver can be optionally implemented by transports that don't want to
+// resolve or transform the multiaddr. Useful for transports that wrap other
+// transports. This lets the inner transport specify how a multiaddr is
+// resolved later.
+// Also useful in cases where the transport doesn't need a resolved address to
+// dial.
+type SkipResolver interface {
+	SkipResolve(ctx context.Context, maddr ma.Multiaddr) bool
+}
+
 // Listener is an interface closely resembling the net.Listener interface. The
 // only real difference is that Accept() returns Conn's of the type in this
 // package, and also exposes a Multiaddr method as opposed to a regular Addr
