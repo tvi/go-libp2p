@@ -46,6 +46,10 @@ func AddTransport(h host.Host, upgrader transport.Upgrader) error {
 
 // Transport interface
 var _ transport.Transport = (*Client)(nil)
+
+// p2p-circuit implements the SkipResolver interface so that the underlying
+// transport can do the address resolution later. If you wrap this transport,
+// make sure you also implement SkipResolver as well.
 var _ transport.SkipResolver = (*Client)(nil)
 var _ io.Closer = (*Client)(nil)
 
