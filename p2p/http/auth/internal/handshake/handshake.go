@@ -81,7 +81,7 @@ func (p *params) parsePeerIDAuthSchemeParams(headerVal []byte) error {
 			p.sigB64 = v
 		}
 	}
-	return nil
+	return err
 }
 
 func splitAuthHeaderParams(data []byte, atEOF bool) (advance int, token []byte, err error) {
@@ -91,6 +91,7 @@ func splitAuthHeaderParams(data []byte, atEOF bool) (advance int, token []byte, 
 
 	start := 0
 	for start < len(data) && (data[start] == ' ' || data[start] == ',') {
+		// Ignore leading spaces and commas
 		start++
 	}
 	if start == len(data) {
@@ -98,6 +99,7 @@ func splitAuthHeaderParams(data []byte, atEOF bool) (advance int, token []byte, 
 	}
 	end := start + 1
 	for end < len(data) && data[end] != ' ' && data[end] != ',' {
+		// Consume until we hit a space or comma
 		end++
 	}
 	token = data[start:end]
@@ -132,8 +134,8 @@ func (h *headerBuilder) maybeAddComma() {
 	h.b.WriteString(", ")
 }
 
-// writeParam writes a key value pair to the header. It first b64 encodes the value.
-// It uses buf as a scratch space.
+// writeParam writes a key value pair to the header. It first b64 encodes the
+// value. It uses buf as scratch space.
 func (h *headerBuilder) writeParamB64(buf []byte, key string, val []byte) {
 	if buf == nil {
 		buf = make([]byte, base64.URLEncoding.EncodedLen(len(val)))

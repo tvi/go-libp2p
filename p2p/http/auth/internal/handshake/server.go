@@ -257,7 +257,7 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 		return nil
 	}
 
-	return nil
+	return errors.New("unhandled state")
 }
 
 func (h *PeerIDAuthHandshakeServer) addChallengeClientParam() error {
@@ -348,6 +348,9 @@ func (h *PeerIDAuthHandshakeServer) PeerID() (peer.ID, error) {
 	case peerIDAuthServerStateVerifyBearer:
 	default:
 		return "", errors.New("not in proper state")
+	}
+	if h.opaque.PeerID == "" {
+		return "", errors.New("peer ID not set")
 	}
 	return h.opaque.PeerID, nil
 }
