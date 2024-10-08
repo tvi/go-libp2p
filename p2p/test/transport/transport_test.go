@@ -3,10 +3,17 @@ package transport_integration
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"runtime"
 	"strings"
@@ -30,8 +37,9 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/libp2p/go-libp2p/p2p/protocol/ping"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
-	tls "github.com/libp2p/go-libp2p/p2p/security/tls"
+	sectls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	libp2pwebrtc "github.com/libp2p/go-libp2p/p2p/transport/webrtc"
+	"github.com/libp2p/go-libp2p/p2p/transport/websocket"
 	"go.uber.org/mock/gomock"
 
 	ma "github.com/multiformats/go-multiaddr"
@@ -48,6 +56,7 @@ type TransportTestCaseOpts struct {
 	NoRcmgr         bool
 	ConnGater       connmgr.ConnectionGater
 	ResourceManager network.ResourceManager
+	HostSeed        string
 }
 
 func transformOpts(opts TransportTestCaseOpts) []config.Option {
@@ -87,7 +96,7 @@ var transportsToTest = []TransportTestCase{
 		Name: "TCP / TLS / Yamux",
 		HostGenerator: func(t *testing.T, opts TransportTestCaseOpts) host.Host {
 			libp2pOpts := transformOpts(opts)
-			libp2pOpts = append(libp2pOpts, libp2p.Security(tls.ID, tls.New))
+			libp2pOpts = append(libp2pOpts, libp2p.Security(sectls.ID, sectls.New))
 			libp2pOpts = append(libp2pOpts, libp2p.Muxer(yamux.ID, yamux.DefaultTransport))
 			if opts.NoListen {
 				libp2pOpts = append(libp2pOpts, libp2p.NoListenAddrs)
@@ -108,6 +117,26 @@ var transportsToTest = []TransportTestCase{
 			} else {
 				libp2pOpts = append(libp2pOpts, libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0/ws"))
 			}
+			h, err := libp2p.New(libp2pOpts...)
+			require.NoError(t, err)
+			return h
+		},
+	},
+	{
+		Name: "Secure WebSocket with CA Certificate",
+		HostGenerator: func(t *testing.T, opts TransportTestCaseOpts) host.Host {
+			libp2pOpts := transformOpts(opts)
+			wsOpts := []interface{}{websocket.WithTLSClientConfig(&tls.Config{InsecureSkipVerify: true})}
+			if opts.NoListen {
+				libp2pOpts = append(libp2pOpts, libp2p.NoListenAddrs)
+			} else {
+				dnsName := fmt.Sprintf("example%s.com", opts.HostSeed)
+				cert, err := generateSelfSignedCert(dnsName)
+				require.NoError(t, err)
+				libp2pOpts = append(libp2pOpts, libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/127.0.0.1/tcp/0/tls/sni/%s/ws", dnsName)))
+				wsOpts = append(wsOpts, websocket.WithTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}}))
+			}
+			libp2pOpts = append(libp2pOpts, libp2p.Transport(websocket.New, wsOpts...))
 			h, err := libp2p.New(libp2pOpts...)
 			require.NoError(t, err)
 			return h
@@ -156,6 +185,46 @@ var transportsToTest = []TransportTestCase{
 			return h
 		},
 	},
+}
+
+func generateSelfSignedCert(dnsName string) (tls.Certificate, error) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"My Organization"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // Valid for 1 year
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{dnsName},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	privDER, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	privPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privDER})
+
+	// Load the certificate and key into tls.Certificate
+	return tls.X509KeyPair(certPEM, privPEM)
 }
 
 func TestPing(t *testing.T) {
