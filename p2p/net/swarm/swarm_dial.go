@@ -20,17 +20,9 @@ import (
 	manet "github.com/multiformats/go-multiaddr/net"
 )
 
-// The maximum number of address resolution steps we'll perform for a single
-// peer (for all addresses). In other words, the maximum number of times we'll
-// call `.Resolve` for all of a peer's addresses
-const maxAddressResolution = 32
-
 // The maximum number of addresses we'll return when resolving all of a peer's
 // address
 const maximumResolvedAddresses = 100
-
-// The maximum queue size of addresses left to resolve.
-const maximumToResolveAddresses = 100
 
 const maximumDNSADDRRecursion = 4
 
