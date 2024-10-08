@@ -255,9 +255,11 @@ func (h *PeerIDAuthHandshakeServer) Run() error {
 		}
 
 		return nil
+	default:
+		return errors.New("unhandled state")
 	}
 
-	return errors.New("unhandled state")
+	return nil
 }
 
 func (h *PeerIDAuthHandshakeServer) addChallengeClientParam() error {

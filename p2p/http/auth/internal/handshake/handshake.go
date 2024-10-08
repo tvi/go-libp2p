@@ -81,6 +81,9 @@ func (p *params) parsePeerIDAuthSchemeParams(headerVal []byte) error {
 			p.sigB64 = v
 		}
 	}
+	if err == bufio.ErrFinalToken {
+		err = nil
+	}
 	return err
 }
 
