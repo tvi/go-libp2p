@@ -2,7 +2,10 @@
 
 package handshake
 
-import "testing"
+import (
+	"bufio"
+	"testing"
+)
 
 func TestParsePeerIDAuthSchemeParamsNoAllocNoCover(t *testing.T) {
 	str := []byte(`libp2p-PeerID peer-id="<server-peer-id-string>", sig="<base64-signature-bytes>", public-key="<base64-encoded-public-key-bytes>", bearer="<base64-encoded-opaque-blob>"`)
@@ -10,7 +13,7 @@ func TestParsePeerIDAuthSchemeParamsNoAllocNoCover(t *testing.T) {
 	allocs := testing.AllocsPerRun(1000, func() {
 		p := params{}
 		err := p.parsePeerIDAuthSchemeParams(str)
-		if err != nil {
+		if err != nil && err != bufio.ErrFinalToken {
 			t.Fatal(err)
 		}
 	})
