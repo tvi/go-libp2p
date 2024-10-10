@@ -494,7 +494,7 @@ func UserAgent(userAgent string) Option {
 }
 
 // MultiaddrResolver sets the libp2p dns resolver
-func MultiaddrResolver(rslv swarm.MultiaddrDNSResolver) Option {
+func MultiaddrResolver(rslv network.MultiaddrDNSResolver) Option {
 	return func(cfg *Config) error {
 		cfg.MultiaddrResolver = rslv
 		return nil

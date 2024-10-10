@@ -60,7 +60,7 @@ func WithConnectionGater(gater connmgr.ConnectionGater) Option {
 }
 
 // WithMultiaddrResolver sets a custom multiaddress resolver
-func WithMultiaddrResolver(resolver MultiaddrDNSResolver) Option {
+func WithMultiaddrResolver(resolver network.MultiaddrDNSResolver) Option {
 	return func(s *Swarm) error {
 		s.multiaddrResolver = resolver
 		return nil
@@ -145,14 +145,6 @@ func WithReadOnlyBlackHoleDetector() Option {
 	}
 }
 
-type MultiaddrDNSResolver interface {
-	// ResolveDNSAddr resolves the first /dnsaddr component in a multiaddr.
-	// Recurisvely resolves DNSADDRs up to the recursion limit
-	ResolveDNSAddr(ctx context.Context, expectedPeerID peer.ID, maddr ma.Multiaddr, recursionLimit, outputLimit int) ([]ma.Multiaddr, error)
-	// ResolveDNSComponent resolves the first /{dns,dns4,dns6} component in a multiaddr.
-	ResolveDNSComponent(ctx context.Context, maddr ma.Multiaddr, outputLimit int) ([]ma.Multiaddr, error)
-}
-
 // Swarm is a connection muxer, allowing connections to other peers to
 // be opened and closed, while still using the same Chan for all
 // communication. The Chan sends/receives Messages, which note the
@@ -204,7 +196,7 @@ type Swarm struct {
 		m map[int]transport.Transport
 	}
 
-	multiaddrResolver MultiaddrDNSResolver
+	multiaddrResolver network.MultiaddrDNSResolver
 
 	// stream handlers
 	streamh atomic.Pointer[network.StreamHandler]
@@ -860,7 +852,7 @@ type ResolverFromMaDNS struct {
 	*madns.Resolver
 }
 
-var _ MultiaddrDNSResolver = ResolverFromMaDNS{}
+var _ network.MultiaddrDNSResolver = ResolverFromMaDNS{}
 
 func startsWithDNSADDR(m ma.Multiaddr) bool {
 	if m == nil {

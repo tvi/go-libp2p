@@ -113,7 +113,7 @@ type Config struct {
 	Peerstore  peerstore.Peerstore
 	Reporter   metrics.Reporter
 
-	MultiaddrResolver swarm.MultiaddrDNSResolver
+	MultiaddrResolver network.MultiaddrDNSResolver
 
 	DisablePing bool
 
