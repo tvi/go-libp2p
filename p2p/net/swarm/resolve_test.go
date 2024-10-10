@@ -83,4 +83,38 @@ func TestSwarmResolver(t *testing.T) {
 		require.Equal(t, 1, len(res))
 		require.Equal(t, "/dnsaddr/255.example.com", res[0].String())
 	})
+
+	t.Run("Test Resolve at output limit", func(t *testing.T) {
+		recursiveDNSAddr := make(map[string][]string)
+		recursiveDNSAddr["_dnsaddr.example.com"] = []string{
+			"dnsaddr=/dnsaddr/0.example.com",
+			"dnsaddr=/dnsaddr/1.example.com",
+			"dnsaddr=/dnsaddr/2.example.com",
+			"dnsaddr=/dnsaddr/3.example.com",
+			"dnsaddr=/dnsaddr/4.example.com",
+			"dnsaddr=/dnsaddr/5.example.com",
+			"dnsaddr=/dnsaddr/6.example.com",
+			"dnsaddr=/dnsaddr/7.example.com",
+			"dnsaddr=/dnsaddr/8.example.com",
+			"dnsaddr=/dnsaddr/9.example.com",
+		}
+		recursiveDNSAddr["_dnsaddr.0.example.com"] = []string{"dnsaddr=/ip4/127.0.0.1"}
+		recursiveDNSAddr["_dnsaddr.1.example.com"] = []string{"dnsaddr=/ip4/127.0.0.1"}
+		recursiveDNSAddr["_dnsaddr.2.example.com"] = []string{"dnsaddr=/ip4/127.0.0.1"}
+		recursiveDNSAddr["_dnsaddr.3.example.com"] = []string{"dnsaddr=/ip4/127.0.0.1"}
+		recursiveDNSAddr["_dnsaddr.4.example.com"] = []string{"dnsaddr=/ip4/127.0.0.1"}
+		recursiveDNSAddr["_dnsaddr.5.example.com"] = []string{"dnsaddr=/ip4/127.0.0.1"}
+		recursiveDNSAddr["_dnsaddr.6.example.com"] = []string{"dnsaddr=/ip4/127.0.0.1"}
+		recursiveDNSAddr["_dnsaddr.7.example.com"] = []string{"dnsaddr=/ip4/127.0.0.1"}
+		recursiveDNSAddr["_dnsaddr.8.example.com"] = []string{"dnsaddr=/ip4/127.0.0.1"}
+		recursiveDNSAddr["_dnsaddr.9.example.com"] = []string{"dnsaddr=/ip4/127.0.0.1"}
+		mockResolver.TXT = recursiveDNSAddr
+
+		res, err = swarmResolver.ResolveDNSAddr(ctx, "", multiaddr.StringCast("/dnsaddr/example.com"), 256, 10)
+		require.NoError(t, err)
+		require.Equal(t, 10, len(res))
+		for _, r := range res {
+			require.Equal(t, "/ip4/127.0.0.1", r.String())
+		}
+	})
 }

@@ -893,8 +893,16 @@ func (r ResolverFromMaDNS) ResolveDNSAddr(ctx context.Context, expectedPeerID pe
 		}
 	}
 
-	for _, addr := range toResolve {
-		resolvedAddrs, err := r.ResolveDNSAddr(ctx, expectedPeerID, addr, recursionLimit-1, outputLimit-len(resolved))
+	for i, addr := range toResolve {
+		// Set the nextOutputLimit to:
+		//   outputLimit
+		//   - len(resolved)          // What we already have resolved
+		//   - (len(toResolve) - i)   // How many addresses we have left to resolve
+		//   + 1                      // The current address we are resolving
+		// This assumes that each DNSADDR address will resolve to at least one multiaddr.
+		// This assumption lets us bound the space we reserve for resolving.
+		nextOutputLimit := outputLimit - len(resolved) - (len(toResolve) - i) + 1
+		resolvedAddrs, err := r.ResolveDNSAddr(ctx, expectedPeerID, addr, recursionLimit-1, nextOutputLimit)
 		if err != nil {
 			log.Warnf("failed to resolve dnsaddr %v %s: ", addr, err)
 			// Dropping this address
