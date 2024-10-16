@@ -261,7 +261,7 @@ func (as *AmbientAutoNAT) checkAddrs() (hasNewAddr bool) {
 		}
 		as.ourAddrs[string(a.Bytes())] = struct{}{}
 	}
-	return false
+	return hasNewAddr
 }
 
 // scheduleProbe calculates when the next probe should be scheduled for.
