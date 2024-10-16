@@ -33,6 +33,8 @@ type AmbientAutoNAT struct {
 
 	inboundConn   chan network.Conn
 	dialResponses chan error
+	// Used when testing the autonat service
+	observations chan network.Reachability
 	// status is an autoNATResult reflecting current status.
 	status atomic.Pointer[network.Reachability]
 	// Reflects the confidence on of the NATStatus being private, as a single
@@ -113,6 +115,7 @@ func New(h host.Host, options ...Option) (AutoNAT, error) {
 		config:            conf,
 		inboundConn:       make(chan network.Conn, 5),
 		dialResponses:     make(chan error, 1),
+		observations:      make(chan network.Reachability, 1),
 
 		emitReachabilityChanged: emitReachabilityChanged,
 		service:                 service,
@@ -201,6 +204,9 @@ func (as *AmbientAutoNAT) background() {
 			default:
 				log.Errorf("unknown event type: %T", e)
 			}
+		case obs := <-as.observations:
+			as.recordObservation(obs)
+			continue
 		case err, ok := <-as.dialResponses:
 			if !ok {
 				return
