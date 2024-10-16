@@ -3,6 +3,7 @@ package autonat
 import (
 	"context"
 	"math/rand"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -245,15 +246,10 @@ func (as *AmbientAutoNAT) background() {
 
 func (as *AmbientAutoNAT) checkAddrs() (hasNewAddr bool) {
 	currentAddrs := as.addressFunc()
-	for _, a := range currentAddrs {
-		if !manet.IsPublicAddr(a) {
-			continue
-		}
-		if _, ok := as.ourAddrs[string(a.Bytes())]; !ok {
-			hasNewAddr = true
-			break
-		}
-	}
+	hasNewAddr = slices.ContainsFunc(currentAddrs, func(a ma.Multiaddr) bool {
+		_, ok := as.ourAddrs[string(a.Bytes())]
+		return !ok
+	})
 	clear(as.ourAddrs)
 	for _, a := range currentAddrs {
 		if !manet.IsPublicAddr(a) {
