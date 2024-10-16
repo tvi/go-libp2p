@@ -409,9 +409,13 @@ func (as *AmbientAutoNAT) getPeerToProbe() peer.ID {
 		}
 	}
 
-	n := len(peers)
-	for i, j := rand.Intn(n), 0; j < n; i, j = (i+1)%n, j+1 {
-		p := peers[i]
+	// Shuffle peers
+	for n := len(peers); n > 0; n-- {
+		randIndex := rand.Intn(n)
+		peers[n-1], peers[randIndex] = peers[randIndex], peers[n-1]
+	}
+
+	for _, p := range peers {
 		info := as.host.Peerstore().PeerInfo(p)
 		// Exclude peers which don't support the autonat protocol.
 		if proto, err := as.host.Peerstore().SupportsProtocols(p, AutoNATProto); len(proto) == 0 || err != nil {
