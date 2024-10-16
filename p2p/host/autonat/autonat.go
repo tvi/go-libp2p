@@ -174,10 +174,9 @@ func (as *AmbientAutoNAT) background() {
 	defer as.subscriber.Close()
 	defer as.emitReachabilityChanged.Close()
 
-	// We want an update when our public non-relay listen addresses have changed.
-	// EvtLocalAddressesUpdated is a poor proxy for that. It works when the host is Public,
-	// but fails when the host is private and used with AutoRelay.
-	addrChangeTicker := time.NewTicker(1 * time.Minute)
+	// Fallback timer to update address in case EvtLocalAddressesUpdated is not emitted.
+	// TODO: The event not emitting properly is a bug. This is a workaround.
+	addrChangeTicker := time.NewTicker(30 * time.Minute)
 	defer addrChangeTicker.Stop()
 
 	timer := time.NewTimer(delay)
