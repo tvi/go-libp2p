@@ -3,6 +3,7 @@ package holepunch_test
 import (
 	"context"
 	"net"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -492,7 +493,9 @@ func makeRelayedHosts(t *testing.T, h1opt, h2opt []holepunch.Option, addHolePunc
 func addHolePunchService(t *testing.T, h host.Host, opts ...holepunch.Option) *holepunch.Service {
 	t.Helper()
 	hps, err := holepunch.NewService(h, newMockIDService(t, h), func() []ma.Multiaddr {
-		return append(h.Addrs(), ma.StringCast("/ip4/1.2.3.4/tcp/1234"))
+		addrs := h.Addrs()
+		addrs = slices.DeleteFunc(addrs, func(a ma.Multiaddr) bool { return !manet.IsPublicAddr(a) })
+		return append(addrs, ma.StringCast("/ip4/1.2.3.4/tcp/1234"))
 	}, opts...)
 	require.NoError(t, err)
 	return hps

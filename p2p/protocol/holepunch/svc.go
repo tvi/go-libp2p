@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 	"time"
 
@@ -18,7 +17,6 @@ import (
 	"github.com/libp2p/go-msgio/pbio"
 
 	ma "github.com/multiformats/go-multiaddr"
-	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 // Protocol is the libp2p protocol for Hole Punching.
@@ -70,6 +68,8 @@ type Service struct {
 // no matter if they are behind a NAT / firewall or not.
 // The Service handles DCUtR streams (which are initiated from the node behind
 // a NAT / Firewall once we establish a connection to them through a relay.
+//
+// listenAddrs MUST only return public addresses.
 func NewService(h host.Host, ids identify.IDService, listenAddrs func() []ma.Multiaddr, opts ...Option) (*Service, error) {
 	if ids == nil {
 		return nil, errors.New("identify service can't be nil")
@@ -113,7 +113,7 @@ func (s *Service) waitForPublicAddr() {
 	t := time.NewTimer(duration)
 	defer t.Stop()
 	for {
-		if len(s.getPublicAddrs()) > 0 {
+		if len(s.listenAddrs()) > 0 {
 			log.Debug("Host now has a public address. Starting holepunch protocol.")
 			s.host.SetStreamHandler(Protocol, s.handleNewStream)
 			break
@@ -262,11 +262,6 @@ func (s *Service) handleNewStream(str network.Stream) {
 	dt := time.Since(start)
 	s.tracer.EndHolePunch(rp, dt, err)
 	s.tracer.HolePunchFinished("receiver", 1, addrs, ownAddrs, getDirectConnection(s.host, rp))
-}
-
-// getPublicAddrs returns public observed and interface addresses
-func (s *Service) getPublicAddrs() []ma.Multiaddr {
-	return slices.DeleteFunc(s.listenAddrs(), func(a ma.Multiaddr) bool { return !manet.IsPublicAddr(a) })
 }
 
 // DirectConnect is only exposed for testing purposes.
