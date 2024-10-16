@@ -12,7 +12,7 @@ import (
 )
 
 func removeRelayAddrs(addrs []ma.Multiaddr) []ma.Multiaddr {
-	return slices.DeleteFunc(addrs, func(a ma.Multiaddr) bool { return isRelayAddress(a) })
+	return slices.DeleteFunc(addrs, isRelayAddress)
 }
 
 func isRelayAddress(a ma.Multiaddr) bool {
