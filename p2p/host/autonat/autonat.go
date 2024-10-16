@@ -264,24 +264,27 @@ func (as *AmbientAutoNAT) checkAddrs() (hasNewAddr bool) {
 func (as *AmbientAutoNAT) scheduleProbe(forceProbe bool) time.Duration {
 	now := time.Now()
 	currentStatus := *as.status.Load()
-
 	nextProbeAfter := as.config.refreshInterval
-	if forceProbe && currentStatus == network.ReachabilityUnknown {
+	receivedInbound := as.lastInbound.After(as.lastProbe)
+	switch {
+	case forceProbe && currentStatus == network.ReachabilityUnknown:
 		// retry very quicky if forceProbe is true *and* we don't know our reachability
 		// limit all peers fetch from peerstore to 1 per second.
 		nextProbeAfter = 2 * time.Second
-	} else if currentStatus == network.ReachabilityUnknown ||
-		as.confidence < maxConfidence ||
-		(currentStatus != network.ReachabilityPublic && as.lastInbound.After(as.lastProbe)) {
+		nextProbeAfter = 2 * time.Second
+	case currentStatus == network.ReachabilityUnknown,
+		as.confidence < maxConfidence,
+		currentStatus != network.ReachabilityPublic && receivedInbound:
 		// Retry quickly in case:
 		// 1. Our reachability is Unknown
 		// 2. We don't have enough confidence in our reachability.
 		// 3. We're private but we received an inbound connection.
 		nextProbeAfter = as.config.retryInterval
-	} else if currentStatus == network.ReachabilityPublic && as.lastInbound.After(as.lastProbe) {
+	case currentStatus == network.ReachabilityPublic && receivedInbound:
 		// We are public and we received an inbound connection recently,
 		// wait a little longer
 		nextProbeAfter *= 2
+		nextProbeAfter = min(nextProbeAfter, maxRefreshInterval)
 	}
 	nextProbeTime := as.lastProbe.Add(nextProbeAfter)
 	if nextProbeTime.Before(now) {
