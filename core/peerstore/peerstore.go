@@ -138,9 +138,6 @@ type AddrBook interface {
 //	    cab.ConsumePeerRecord(signedPeerRecord, aTTL)
 //	}
 type CertifiedAddrBook interface {
-	// A CertifiedAddrBook is an address book. To remove peers, use the available
-	// methods on the AddrBook.
-	AddrBook
 	// ConsumePeerRecord stores a signed peer record and the contained addresses for
 	// ttl duration.
 	// The addresses contained in the signed peer record will expire after ttl. If any
