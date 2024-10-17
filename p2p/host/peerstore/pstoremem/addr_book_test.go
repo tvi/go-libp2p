@@ -175,8 +175,7 @@ func TestPeerAddrsExpiry(t *testing.T) {
 }
 
 func BenchmarkPeerAddrs(b *testing.B) {
-	// sizes := [...]int{1, 10, 100, 1000, 10_000, 100_000, 1000_000}
-	sizes := [...]int{10_000}
+	sizes := [...]int{1, 10, 100, 1000, 10_000, 100_000, 1000_000}
 	for _, sz := range sizes {
 		b.Run(fmt.Sprintf("%d", sz), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
