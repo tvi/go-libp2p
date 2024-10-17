@@ -32,6 +32,16 @@ func (e *expiringAddr) ExpiredBy(t time.Time) bool {
 	return !t.Before(e.Expiry)
 }
 
+func (e *expiringAddr) IsConnected() bool {
+	return ttlIsConnected(e.TTL)
+}
+
+// ttlIsConnected returns true if the TTL is at least as long as the connected
+// TTL.
+func ttlIsConnected(ttl time.Duration) bool {
+	return ttl >= peerstore.ConnectedAddrTTL
+}
+
 var expiringAddrPool = sync.Pool{New: func() any { return &expiringAddr{} }}
 
 func getExpiringAddrs() *expiringAddr {
@@ -55,7 +65,9 @@ type peerRecordState struct {
 var _ heap.Interface = &peerAddrs{}
 
 type peerAddrs struct {
-	Addrs        map[peer.ID]map[string]*expiringAddr // peer.ID -> addr.Bytes() -> *expiringAddr
+	Addrs map[peer.ID]map[string]*expiringAddr // peer.ID -> addr.Bytes() -> *expiringAddr
+	// expiringHeap only stores non-connected addresses. Since connected address
+	// basically have an infinite TTL
 	expiringHeap []*expiringAddr
 }
 
@@ -130,7 +142,7 @@ func (pa *peerAddrs) Update(a *expiringAddr) {
 	if a.heapIndex == -1 {
 		return
 	}
-	if a.TTL >= peerstore.ConnectedAddrTTL {
+	if a.IsConnected() {
 		heap.Remove(pa, a.heapIndex)
 	} else {
 		heap.Fix(pa, a.heapIndex)
@@ -143,14 +155,14 @@ func (pa *peerAddrs) Insert(a *expiringAddr) {
 		pa.Addrs[a.Peer] = make(map[string]*expiringAddr)
 	}
 	pa.Addrs[a.Peer][string(a.Addr.Bytes())] = a
-	// don't add permanent addr to heap.
-	if a.TTL >= peerstore.ConnectedAddrTTL {
+	// don't add connected addr to heap.
+	if a.IsConnected() {
 		return
 	}
 	heap.Push(pa, a)
 }
 
-func (pa *peerAddrs) NumNonConnectedAddrs() int {
+func (pa *peerAddrs) NumUnconnectedAddrs() int {
 	return len(pa.expiringHeap)
 }
 
@@ -342,7 +354,7 @@ func (mab *memoryAddrBook) addAddrsUnlocked(p peer.ID, addrs []ma.Multiaddr, ttl
 	}
 
 	// we are over limit, drop these addrs.
-	if ttl < peerstore.ConnectedAddrTTL && mab.addrs.NumNonConnectedAddrs() >= mab.maxUnconnectedAddrs {
+	if !ttlIsConnected(ttl) && mab.addrs.NumUnconnectedAddrs() >= mab.maxUnconnectedAddrs {
 		return
 	}
 
@@ -410,7 +422,7 @@ func (mab *memoryAddrBook) SetAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Du
 
 		if a, found := mab.addrs.FindAddr(p, addr); found {
 			if ttl > 0 {
-				if a.TTL >= peerstore.ConnectedAddrTTL && ttl < peerstore.ConnectedAddrTTL && mab.addrs.NumNonConnectedAddrs() >= mab.maxUnconnectedAddrs {
+				if a.IsConnected() && !ttlIsConnected(ttl) && mab.addrs.NumUnconnectedAddrs() >= mab.maxUnconnectedAddrs {
 					mab.addrs.Delete(a)
 					putExpiringAddrs(a)
 				} else {
@@ -426,7 +438,7 @@ func (mab *memoryAddrBook) SetAddrs(p peer.ID, addrs []ma.Multiaddr, ttl time.Du
 			}
 		} else {
 			if ttl > 0 {
-				if ttl < peerstore.ConnectedAddrTTL && mab.addrs.NumNonConnectedAddrs() >= mab.maxUnconnectedAddrs {
+				if !ttlIsConnected(ttl) && mab.addrs.NumUnconnectedAddrs() >= mab.maxUnconnectedAddrs {
 					continue
 				}
 				entry := getExpiringAddrs()
@@ -454,7 +466,7 @@ func (mab *memoryAddrBook) UpdateAddrs(p peer.ID, oldTTL time.Duration, newTTL t
 				putExpiringAddrs(a)
 			} else {
 				// We are over limit, drop these addresses.
-				if oldTTL >= peerstore.ConnectedAddrTTL && newTTL < peerstore.ConnectedAddrTTL && mab.addrs.NumNonConnectedAddrs() >= mab.maxUnconnectedAddrs {
+				if ttlIsConnected(oldTTL) && !ttlIsConnected(newTTL) && mab.addrs.NumUnconnectedAddrs() >= mab.maxUnconnectedAddrs {
 					mab.addrs.Delete(a)
 					putExpiringAddrs(a)
 				} else {
