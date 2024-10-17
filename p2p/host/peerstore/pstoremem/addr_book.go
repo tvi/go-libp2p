@@ -45,7 +45,9 @@ func ttlIsConnected(ttl time.Duration) bool {
 var expiringAddrPool = sync.Pool{New: func() any { return &expiringAddr{} }}
 
 func getExpiringAddrs() *expiringAddr {
-	return expiringAddrPool.Get().(*expiringAddr)
+	a := expiringAddrPool.Get().(*expiringAddr)
+	a.heapIndex = -1
+	return a
 }
 
 func putExpiringAddrs(ea *expiringAddr) {
