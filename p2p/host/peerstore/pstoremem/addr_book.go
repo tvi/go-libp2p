@@ -227,6 +227,9 @@ func WithClock(clock clock) AddrBookOption {
 	}
 }
 
+// WithMaxAddresses sets the maximum number of unconnected addresses to store.
+// The maximum number of connected addresses is bounded by the connection
+// limits in the Connection Manager and Resource Manager.
 func WithMaxAddresses(n int) AddrBookOption {
 	return func(b *memoryAddrBook) error {
 		b.maxUnconnectedAddrs = n

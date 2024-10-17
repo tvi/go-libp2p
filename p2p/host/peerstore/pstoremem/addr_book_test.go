@@ -174,6 +174,18 @@ func TestPeerAddrsExpiry(t *testing.T) {
 	}
 }
 
+func TestPeerLimits(t *testing.T) {
+	ab := NewAddrBook()
+	defer ab.Close()
+	ab.maxUnconnectedAddrs = 1024
+
+	peers := peerAddrsInput(2048)
+	for _, p := range peers {
+		ab.AddAddr(p.Peer, p.Addr, p.TTL)
+	}
+	require.Equal(t, 1024, ab.addrs.NumUnconnectedAddrs())
+}
+
 func BenchmarkPeerAddrs(b *testing.B) {
 	sizes := [...]int{1, 10, 100, 1000, 10_000, 100_000, 1000_000}
 	for _, sz := range sizes {
