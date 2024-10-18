@@ -34,6 +34,7 @@ require (
 	github.com/libp2p/go-reuseport v0.4.0
 	github.com/libp2p/go-yamux/v4 v4.0.1
 	github.com/libp2p/zeroconf/v2 v2.2.0
+	github.com/marcopolo/webtransport-go v0.8.1-0.20241018011450-5c8d91a42ba0
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b
 	github.com/mr-tron/base58 v1.2.0
@@ -55,8 +56,7 @@ require (
 	github.com/pion/webrtc/v3 v3.3.4
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1
-	github.com/quic-go/quic-go v0.47.0
-	github.com/quic-go/webtransport-go v0.8.0
+	github.com/quic-go/quic-go v0.48.0
 	github.com/raulk/go-watchdog v1.3.0
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/fx v1.23.0
