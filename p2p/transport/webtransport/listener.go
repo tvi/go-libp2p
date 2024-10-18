@@ -17,7 +17,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
-	"github.com/marcopolo/webtransport-go"
+	"github.com/quic-go/webtransport-go"
 )
 
 const queueLen = 16
