@@ -55,7 +55,7 @@ require (
 	github.com/pion/webrtc/v3 v3.3.4
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1
-	github.com/quic-go/quic-go v0.47.0
+	github.com/quic-go/quic-go v0.48.0
 	github.com/quic-go/webtransport-go v0.8.0
 	github.com/raulk/go-watchdog v1.3.0
 	github.com/stretchr/testify v1.9.0
