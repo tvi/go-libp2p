@@ -6,6 +6,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/fx"
 )
@@ -44,4 +45,16 @@ func TestGetHost(t *testing.T) {
 	defer host.Close()
 
 	require.NotNil(t, h)
+}
+
+func TestGetIDService(t *testing.T) {
+	var id identify.IDService
+	host, err := New(
+		NoTransports,
+		WithFxOption(fx.Populate(&id)),
+	)
+	require.NoError(t, err)
+	defer host.Close()
+
+	require.NotNil(t, id)
 }

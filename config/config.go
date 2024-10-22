@@ -36,6 +36,7 @@ import (
 	circuitv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
 	"github.com/libp2p/go-libp2p/p2p/protocol/holepunch"
+	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
 	"github.com/libp2p/go-libp2p/p2p/transport/quicreuse"
 	libp2pwebrtc "github.com/libp2p/go-libp2p/p2p/transport/webrtc"
 	"github.com/prometheus/client_golang/prometheus"
@@ -484,6 +485,9 @@ func (cfg *Config) NewNode() (host.Host, error) {
 			return sw, nil
 		}),
 		fx.Provide(cfg.newBasicHost),
+		fx.Provide(func(bh *bhost.BasicHost) identify.IDService {
+			return bh.IDService()
+		}),
 		fx.Provide(func(bh *bhost.BasicHost) host.Host {
 			return bh
 		}),
