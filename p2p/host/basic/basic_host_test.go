@@ -965,7 +965,8 @@ func TestHostTimeoutNewStream(t *testing.T) {
 		assert.NoError(t, err)
 
 		msgLen, varintN := binary.Uvarint(buf[:n])
-		proto := buf[varintN : varintN+int(msgLen)]
+		buf = buf[varintN:]
+		proto := buf[:int(msgLen)]
 		if string(proto) == "/ipfs/id/1.0.0\n" {
 			// Signal we don't support identify
 			na := []byte("na\n")
@@ -977,15 +978,16 @@ func TestHostTimeoutNewStream(t *testing.T) {
 		} else {
 			// Stall
 			time.Sleep(5 * time.Second)
-			t.Log("Resetting")
 		}
+		t.Log("Resetting")
 		s.Reset()
 	})
 
-	h1.Connect(context.Background(), peer.AddrInfo{
+	err = h1.Connect(context.Background(), peer.AddrInfo{
 		ID:    h2.LocalPeer(),
 		Addrs: h2.ListenAddresses(),
 	})
+	require.NoError(t, err)
 
 	// No context passed in, fallback to negtimeout
 	h1.negtimeout = time.Second
