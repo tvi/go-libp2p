@@ -1,17 +1,44 @@
 package sampledconn
 
 import (
+	"errors"
 	"io"
 	"net"
+	"syscall"
 	"time"
 )
 
-const sampleSize = 3
+const peekSize = 3
 
-type fallbackSampledConn struct {
+type PeekedBytes = [peekSize]byte
+
+var errNotSupported = errors.New("not supported on this platform")
+
+var ErrNotTCPConn = errors.New("passed conn is not a TCPConn")
+
+func PeekBytes(conn net.Conn) (PeekedBytes, net.Conn, error) {
+	if c, ok := conn.(syscall.Conn); ok {
+		b, err := OSPeekConn(c)
+		if err == nil {
+			return b, conn, nil
+		}
+		if err != errNotSupported {
+			return PeekedBytes{}, nil, err
+		}
+		// Fallback to wrapping the coonn
+	}
+
+	if c, ok := conn.(tcpConnInterface); ok {
+		return newFallbackSampledConn(c)
+	}
+
+	return PeekedBytes{}, nil, ErrNotTCPConn
+}
+
+type fallbackPeekingConn struct {
 	tcpConnInterface
-	Sample         [sampleSize]byte
-	readFromSample uint8
+	peekedBytes PeekedBytes
+	bytesPeeked uint8
 }
 
 // tcpConnInterface is the interface for TCPConn's functions
@@ -33,19 +60,19 @@ type tcpConnInterface interface {
 	io.WriterTo
 }
 
-func newFallbackSampledConn(conn tcpConnInterface) (*fallbackSampledConn, error) {
-	s := &fallbackSampledConn{tcpConnInterface: conn}
-	_, err := io.ReadFull(conn, s.Sample[:])
+func newFallbackSampledConn(conn tcpConnInterface) (PeekedBytes, *fallbackPeekingConn, error) {
+	s := &fallbackPeekingConn{tcpConnInterface: conn}
+	_, err := io.ReadFull(conn, s.peekedBytes[:])
 	if err != nil {
-		return nil, err
+		return s.peekedBytes, nil, err
 	}
-	return s, nil
+	return s.peekedBytes, s, nil
 }
 
-func (sc *fallbackSampledConn) Read(b []byte) (int, error) {
-	if int(sc.readFromSample) != len(sc.Sample) {
-		red := copy(b, sc.Sample[sc.readFromSample:])
-		sc.readFromSample += uint8(red)
+func (sc *fallbackPeekingConn) Read(b []byte) (int, error) {
+	if int(sc.bytesPeeked) != len(sc.peekedBytes) {
+		red := copy(b, sc.peekedBytes[sc.bytesPeeked:])
+		sc.bytesPeeked += uint8(red)
 		return red, nil
 	}
 

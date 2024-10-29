@@ -45,19 +45,19 @@ func TestSampledConn(t *testing.T) {
 
 			if tc == "platform" {
 				// Wrap the client connection in SampledConn
-				sampledConn, err := NewSampledConn(clientConn.(*net.TCPConn))
+				peeked, clientConn, err := PeekBytes(clientConn.(*net.TCPConn))
 				assert.NoError(t, err)
-				assert.Equal(t, "hel", string(sampledConn.Sample[:]))
+				assert.Equal(t, "hel", string(peeked[:]))
 
 				buf := make([]byte, 5)
-				_, err = sampledConn.Read(buf)
+				_, err = clientConn.Read(buf)
 				assert.NoError(t, err)
 				assert.Equal(t, "hello", string(buf))
 			} else {
 				// Wrap the client connection in SampledConn
-				sampledConn, err := newFallbackSampledConn(clientConn.(tcpConnInterface))
+				sample, sampledConn, err := newFallbackSampledConn(clientConn.(tcpConnInterface))
 				assert.NoError(t, err)
-				assert.Equal(t, "hel", string(sampledConn.Sample[:]))
+				assert.Equal(t, "hel", string(sample[:]))
 
 				buf := make([]byte, 5)
 				_, err = io.ReadFull(sampledConn, buf)

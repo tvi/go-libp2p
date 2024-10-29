@@ -4,19 +4,11 @@ package sampledconn
 
 import (
 	"errors"
-	"net"
 	"syscall"
 )
 
-type SampledConn struct {
-	*net.TCPConn
-	Sample [sampleSize]byte
-}
-
-func NewSampledConn(conn *net.TCPConn) (SampledConn, error) {
-	s := SampledConn{
-		TCPConn: conn,
-	}
+func OSPeekConn(conn syscall.Conn) (PeekedBytes, error) {
+	s := PeekedBytes{}
 
 	rawConn, err := conn.SyscallConn()
 	if err != nil {
@@ -26,9 +18,9 @@ func NewSampledConn(conn *net.TCPConn) (SampledConn, error) {
 	readBytes := 0
 	var readErr error
 	err = rawConn.Read(func(fd uintptr) bool {
-		for readBytes < sampleSize {
+		for readBytes < peekSize {
 			var n int
-			n, _, readErr = syscall.Recvfrom(int(fd), s.Sample[readBytes:], syscall.MSG_PEEK)
+			n, _, readErr = syscall.Recvfrom(int(fd), s[readBytes:], syscall.MSG_PEEK)
 			if errors.Is(readErr, syscall.EAGAIN) {
 				return false
 			}
