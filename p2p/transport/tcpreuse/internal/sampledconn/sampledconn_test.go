@@ -2,9 +2,12 @@ package sampledconn
 
 import (
 	"io"
-	"net"
+	"syscall"
 	"testing"
 	"time"
+
+	ma "github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -16,11 +19,11 @@ func TestSampledConn(t *testing.T) {
 	}
 
 	// Start a TCP server
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := manet.Listen(ma.StringCast("/ip4/127.0.0.1/tcp/0"))
 	assert.NoError(t, err)
 	defer listener.Close()
 
-	serverAddr := listener.Addr().String()
+	serverAddr := listener.Multiaddr()
 
 	// Server goroutine
 	go func() {
@@ -39,13 +42,16 @@ func TestSampledConn(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc, func(t *testing.T) {
 			// Create a TCP client
-			clientConn, err := net.Dial("tcp", serverAddr)
+			clientConn, err := manet.Dial(serverAddr)
 			assert.NoError(t, err)
 			defer clientConn.Close()
 
 			if tc == "platform" {
 				// Wrap the client connection in SampledConn
-				peeked, clientConn, err := PeekBytes(clientConn.(*net.TCPConn))
+				peeked, clientConn, err := PeekBytes(clientConn.(interface {
+					manet.Conn
+					syscall.Conn
+				}))
 				assert.NoError(t, err)
 				assert.Equal(t, "hel", string(peeked[:]))
 
@@ -55,7 +61,7 @@ func TestSampledConn(t *testing.T) {
 				assert.Equal(t, "hello", string(buf))
 			} else {
 				// Wrap the client connection in SampledConn
-				sample, sampledConn, err := newFallbackSampledConn(clientConn.(tcpConnInterface))
+				sample, sampledConn, err := newFallbackSampledConn(clientConn.(ManetTCPConnInterface))
 				assert.NoError(t, err)
 				assert.Equal(t, "hel", string(sample[:]))
 
