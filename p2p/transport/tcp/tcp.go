@@ -142,6 +142,8 @@ type TcpTransport struct {
 	rcmgr network.ResourceManager
 
 	reuse reuseport.Transport
+
+	metricsCollector *aggregatingCollector
 }
 
 var _ transport.Transport = &TcpTransport{}
@@ -231,7 +233,7 @@ func (t *TcpTransport) dialWithScope(ctx context.Context, raddr ma.Multiaddr, p 
 	c := conn
 	if t.enableMetrics {
 		var err error
-		c, err = newTracingConn(conn, true)
+		c, err = newTracingConn(conn, t.metricsCollector, true)
 		if err != nil {
 			return nil, err
 		}
@@ -277,7 +279,7 @@ func (t *TcpTransport) Listen(laddr ma.Multiaddr) (transport.Listener, error) {
 	}
 
 	if t.enableMetrics {
-		list = newTracingListener(&tcpListener{list, 0})
+		list = newTracingListener(&tcpListener{list, 0}, t.metricsCollector)
 	}
 	return t.upgrader.UpgradeListener(t, list), nil
 }

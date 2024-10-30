@@ -6,6 +6,8 @@ import (
 	"net"
 	"syscall"
 	"time"
+
+	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 const peekSize = 3
@@ -16,7 +18,7 @@ var errNotSupported = errors.New("not supported on this platform")
 
 var ErrNotTCPConn = errors.New("passed conn is not a TCPConn")
 
-func PeekBytes(conn net.Conn) (PeekedBytes, net.Conn, error) {
+func PeekBytes(conn manet.Conn) (PeekedBytes, manet.Conn, error) {
 	if c, ok := conn.(syscall.Conn); ok {
 		b, err := OSPeekConn(c)
 		if err == nil {
@@ -28,7 +30,7 @@ func PeekBytes(conn net.Conn) (PeekedBytes, net.Conn, error) {
 		// Fallback to wrapping the coonn
 	}
 
-	if c, ok := conn.(tcpConnInterface); ok {
+	if c, ok := conn.(ManetTCPConnInterface); ok {
 		return newFallbackSampledConn(c)
 	}
 
@@ -36,16 +38,18 @@ func PeekBytes(conn net.Conn) (PeekedBytes, net.Conn, error) {
 }
 
 type fallbackPeekingConn struct {
-	tcpConnInterface
+	ManetTCPConnInterface
 	peekedBytes PeekedBytes
 	bytesPeeked uint8
 }
 
 // tcpConnInterface is the interface for TCPConn's functions
-// NOTE: Skipping `SyscallConn() (syscall.RawConn, error)` since it can be
-// misused given we've read a few bytes from the connection.
+// NOTE: `SyscallConn() (syscall.RawConn, error)` is here to make using this as
+// a TCP Conn easier, but it's a potential footgun as you could skipped the
+// peeked bytes if using the fallback
 type tcpConnInterface interface {
 	net.Conn
+	syscall.Conn
 
 	CloseRead() error
 	CloseWrite() error
@@ -60,8 +64,13 @@ type tcpConnInterface interface {
 	io.WriterTo
 }
 
-func newFallbackSampledConn(conn tcpConnInterface) (PeekedBytes, *fallbackPeekingConn, error) {
-	s := &fallbackPeekingConn{tcpConnInterface: conn}
+type ManetTCPConnInterface interface {
+	manet.Conn
+	tcpConnInterface
+}
+
+func newFallbackSampledConn(conn ManetTCPConnInterface) (PeekedBytes, *fallbackPeekingConn, error) {
+	s := &fallbackPeekingConn{ManetTCPConnInterface: conn}
 	_, err := io.ReadFull(conn, s.peekedBytes[:])
 	if err != nil {
 		return s.peekedBytes, nil, err
@@ -76,5 +85,5 @@ func (sc *fallbackPeekingConn) Read(b []byte) (int, error) {
 		return red, nil
 	}
 
-	return sc.tcpConnInterface.Read(b)
+	return sc.ManetTCPConnInterface.Read(b)
 }
