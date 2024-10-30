@@ -1,7 +1,6 @@
 package tcpreuse
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"time"
@@ -9,16 +8,6 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/transport/tcpreuse/internal/sampledconn"
 	manet "github.com/multiformats/go-multiaddr/net"
 )
-
-type peekAble interface {
-	// Peek returns the next n bytes without advancing the reader. The bytes stop
-	// being valid at the next read call. If Peek returns fewer than n bytes, it
-	// also returns an error explaining why the read is short. The error is
-	// [ErrBufferFull] if n is larger than b's buffer size.
-	Peek(n int) ([]byte, error)
-}
-
-var _ peekAble = (*bufio.Reader)(nil)
 
 // TODO: We can unexport this type and rely completely on the multiaddr passed in to
 // DemultiplexedListen.
