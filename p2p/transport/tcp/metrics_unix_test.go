@@ -13,6 +13,7 @@ import (
 )
 
 func TestTcpTransportCollectsMetricsWithSharedTcpSocket(t *testing.T) {
+
 	peerA, ia := makeInsecureMuxer(t)
 	_, ib := makeInsecureMuxer(t)
 
@@ -29,5 +30,25 @@ func TestTcpTransportCollectsMetricsWithSharedTcpSocket(t *testing.T) {
 	require.NoError(t, err)
 
 	zero := "/ip4/127.0.0.1/tcp/0"
-	ttransport.SubtestTransport(t, ta, tb, zero, peerA)
+
+	// Not running any test that needs more than 1 conn because the testsuite
+	// opens multiple conns via multiple listeners, which is not expected to work
+	// with the shared TCP socket.
+	subtestsToRun := []ttransport.TransportSubTestFn{
+		ttransport.SubtestProtocols,
+		ttransport.SubtestBasic,
+		ttransport.SubtestCancel,
+		ttransport.SubtestPingPong,
+
+		// Stolen from the stream muxer test suite.
+		ttransport.SubtestStress1Conn1Stream1Msg,
+		ttransport.SubtestStress1Conn1Stream100Msg,
+		ttransport.SubtestStress1Conn100Stream100Msg,
+		ttransport.SubtestStress1Conn1000Stream10Msg,
+		ttransport.SubtestStress1Conn100Stream100Msg10MB,
+		ttransport.SubtestStreamOpenStress,
+		ttransport.SubtestStreamReset,
+	}
+
+	ttransport.SubtestTransportWithFs(t, ta, tb, zero, peerA, subtestsToRun)
 }
