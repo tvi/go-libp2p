@@ -210,7 +210,7 @@ func (m *multiplexedListener) run() error {
 
 		select {
 		case acceptQueue <- struct{}{}:
-		// TODO: We can drop the connection, but this is similar to the behaviour in the upgrader.
+		// NOTE: We can drop the connection, but this is similar to the behaviour in the upgrader.
 		case <-m.ctx.Done():
 			c.Close()
 			log.Debugf("accept queue full, dropping connection: %s", c.RemoteMultiaddr())
@@ -229,8 +229,6 @@ func (m *multiplexedListener) run() error {
 				return
 			}
 
-			// TODO: Add a test that makes sure we can get the SyscallConn in Unix platforms.
-			// Wrap the scope into the conn.
 			connWithScope, err := manetConnWithScope(c, connScope)
 			if err != nil {
 				connScope.Done()
