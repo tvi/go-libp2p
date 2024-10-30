@@ -25,7 +25,7 @@ func FuzzClash(f *testing.F) {
 	add('\x16', '\x03', '\x04')
 
 	f.Fuzz(func(t *testing.T, a, b, c byte) {
-		s := Sample{a, b, c}
+		s := Prefix{a, b, c}
 		var total uint
 
 		ms := IsMultistreamSelect(s)

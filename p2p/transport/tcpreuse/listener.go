@@ -220,7 +220,7 @@ func (m *multiplexedListener) run() error {
 		go func() {
 			defer func() { <-acceptQueue }()
 			defer m.wg.Done()
-			t, sampleC, err := getDemultiplexedConn(c, connScope)
+			t, c, err := identifyConnType(c)
 			if err != nil {
 				connScope.Done()
 				closeErr := c.Close()
@@ -229,11 +229,22 @@ func (m *multiplexedListener) run() error {
 				return
 			}
 
+			// TODO: Add a test that makes sure we can get the SyscallConn in Unix platforms.
+			// Wrap the scope into the conn.
+			connWithScope, err := manetConnWithScope(c, connScope)
+			if err != nil {
+				connScope.Done()
+				closeErr := c.Close()
+				err = errors.Join(err, closeErr)
+				log.Debugf("error wrapping connection with scope: %s", err.Error())
+				return
+			}
+
 			m.mx.RLock()
 			demux, ok := m.listeners[t]
 			m.mx.RUnlock()
 			if !ok {
-				closeErr := sampleC.Close()
+				closeErr := connWithScope.Close()
 				if closeErr != nil {
 					log.Debugf("no registered listener for demultiplex connection %s. Error closing the connection %s", t, closeErr.Error())
 				} else {
@@ -243,9 +254,9 @@ func (m *multiplexedListener) run() error {
 			}
 
 			select {
-			case demux.buffer <- sampleC:
+			case demux.buffer <- connWithScope:
 			case <-m.ctx.Done():
-				sampleC.Close()
+				connWithScope.Close()
 				return
 			}
 		}()
