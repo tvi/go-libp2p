@@ -15,7 +15,7 @@ import (
 func TestSampledConn(t *testing.T) {
 	testCases := []string{
 		"platform",
-		// "fallback",
+		"fallback",
 	}
 
 	// Start a TCP server
@@ -27,13 +27,15 @@ func TestSampledConn(t *testing.T) {
 
 	// Server goroutine
 	go func() {
-		conn, err := listener.Accept()
-		assert.NoError(t, err)
-		defer conn.Close()
+		for i := 0; i < len(testCases); i++ {
+			conn, err := listener.Accept()
+			assert.NoError(t, err)
+			defer conn.Close()
 
-		// Write some data to the connection
-		_, err = conn.Write([]byte("hello"))
-		assert.NoError(t, err)
+			// Write some data to the connection
+			_, err = conn.Write([]byte("hello"))
+			assert.NoError(t, err)
+		}
 	}()
 
 	// Give the server a moment to start
