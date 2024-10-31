@@ -204,7 +204,7 @@ func (m *multiplexedListener) run() error {
 		if err != nil {
 			log.Debugw("resource manager blocked accept of new connection", "error", err)
 			if err := c.Close(); err != nil {
-				log.Warnf("failed to incoming connection rejected by resource manager: %s", err)
+				log.Warnf("failed to open incoming connection. Rejected by resource manager: %s", err)
 			}
 			continue
 		}
