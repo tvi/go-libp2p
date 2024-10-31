@@ -644,7 +644,11 @@ func WithFxOption(opts ...fx.Option) Option {
 	}
 }
 
-// ShareTCPListener shares the same listen address between TCP and Websocket transports.
+// ShareTCPListener shares the same listen address between TCP and Websocket
+// transports. This lets both transports use the same TCP port.
+//
+// Currently this behavior is Opt-in. In a future release this will be the
+// default, and this option will be removed.
 func ShareTCPListener() Option {
 	return func(cfg *Config) error {
 		cfg.ShareTCPListener = true
