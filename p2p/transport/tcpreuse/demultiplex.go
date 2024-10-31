@@ -89,7 +89,7 @@ func IsHTTP(s Prefix) bool {
 
 func IsTLS(s Prefix) bool {
 	switch string(s[:]) {
-	case "\x16\x03\x01", "\x16\x03\x02", "\x16\x03\x03", "\x16\x03\x04":
+	case "\x16\x03\x01", "\x16\x03\x02", "\x16\x03\x03":
 		return true
 	default:
 		return false
