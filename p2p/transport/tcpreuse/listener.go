@@ -22,25 +22,25 @@ var log = logging.Logger("tcp-demultiplex")
 
 // ConnMgr enables you to share the same listen address between TCP and WebSocket transports.
 type ConnMgr struct {
-	disableReuseport bool
-	reuse            reuseport.Transport
-	connGater        connmgr.ConnectionGater
-	rcmgr            network.ResourceManager
+	enableReuseport bool
+	reuse           reuseport.Transport
+	connGater       connmgr.ConnectionGater
+	rcmgr           network.ResourceManager
 
 	mx        sync.Mutex
 	listeners map[string]*multiplexedListener
 }
 
-func NewConnMgr(disableReuseport bool, gater connmgr.ConnectionGater, rcmgr network.ResourceManager) *ConnMgr {
+func NewConnMgr(enableReuseport bool, gater connmgr.ConnectionGater, rcmgr network.ResourceManager) *ConnMgr {
 	if rcmgr == nil {
 		rcmgr = &network.NullResourceManager{}
 	}
 	return &ConnMgr{
-		disableReuseport: disableReuseport,
-		reuse:            reuseport.Transport{},
-		connGater:        gater,
-		rcmgr:            rcmgr,
-		listeners:        make(map[string]*multiplexedListener),
+		enableReuseport: enableReuseport,
+		reuse:           reuseport.Transport{},
+		connGater:       gater,
+		rcmgr:           rcmgr,
+		listeners:       make(map[string]*multiplexedListener),
 	}
 }
 
@@ -53,7 +53,7 @@ func (t *ConnMgr) maListen(listenAddr ma.Multiaddr) (manet.Listener, error) {
 }
 
 func (t *ConnMgr) useReuseport() bool {
-	return !t.disableReuseport && ReuseportIsAvailable()
+	return t.enableReuseport && ReuseportIsAvailable()
 }
 
 func getTCPAddr(listenAddr ma.Multiaddr) (ma.Multiaddr, error) {

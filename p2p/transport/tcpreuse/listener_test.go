@@ -64,9 +64,9 @@ func (wh wsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func TestListenerSingle(t *testing.T) {
 	listenAddr := ma.StringCast("/ip4/0.0.0.0/tcp/0")
 	const N = 64
-	for _, disableReuseport := range []bool{true, false} {
-		t.Run(fmt.Sprintf("multistream-reuseport:%v", disableReuseport), func(t *testing.T) {
-			cm := NewConnMgr(disableReuseport, nil, nil)
+	for _, enableReuseport := range []bool{true, false} {
+		t.Run(fmt.Sprintf("multistream-reuseport:%v", enableReuseport), func(t *testing.T) {
+			cm := NewConnMgr(enableReuseport, nil, nil)
 			l, err := cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_MultistreamSelect)
 			require.NoError(t, err)
 			go func() {
@@ -116,8 +116,8 @@ func TestListenerSingle(t *testing.T) {
 			wg.Wait()
 		})
 
-		t.Run(fmt.Sprintf("WebSocket-reuseport:%v", disableReuseport), func(t *testing.T) {
-			cm := NewConnMgr(disableReuseport, nil, nil)
+		t.Run(fmt.Sprintf("WebSocket-reuseport:%v", enableReuseport), func(t *testing.T) {
+			cm := NewConnMgr(enableReuseport, nil, nil)
 			l, err := cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_HTTP)
 			require.NoError(t, err)
 			wh := wsHandler{conns: make(chan *websocket.Conn, acceptQueueSize)}
@@ -168,8 +168,8 @@ func TestListenerSingle(t *testing.T) {
 			wg.Wait()
 		})
 
-		t.Run(fmt.Sprintf("WebSocketTLS-reuseport:%v", disableReuseport), func(t *testing.T) {
-			cm := NewConnMgr(disableReuseport, nil, nil)
+		t.Run(fmt.Sprintf("WebSocketTLS-reuseport:%v", enableReuseport), func(t *testing.T) {
+			cm := NewConnMgr(enableReuseport, nil, nil)
 			l, err := cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_TLS)
 			require.NoError(t, err)
 			defer l.Close()
@@ -227,8 +227,8 @@ func TestListenerSingle(t *testing.T) {
 func TestListenerMultiplexed(t *testing.T) {
 	listenAddr := ma.StringCast("/ip4/0.0.0.0/tcp/0")
 	const N = 20
-	for _, disableReuseport := range []bool{true, false} {
-		cm := NewConnMgr(disableReuseport, nil, nil)
+	for _, enableReuseport := range []bool{true, false} {
+		cm := NewConnMgr(enableReuseport, nil, nil)
 		msl, err := cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_MultistreamSelect)
 		require.NoError(t, err)
 		defer msl.Close()
@@ -405,7 +405,7 @@ func TestListenerClose(t *testing.T) {
 
 	testClose := func(listenAddr ma.Multiaddr) {
 		// listen on port 0
-		cm := NewConnMgr(true, nil, nil)
+		cm := NewConnMgr(false, nil, nil)
 		ml, err := cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_MultistreamSelect)
 		require.NoError(t, err)
 		wl, err := cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_HTTP)
