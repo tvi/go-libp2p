@@ -117,13 +117,6 @@ func WithMetrics() Option {
 	}
 }
 
-func WithSharedTCP(mgr *tcpreuse.ConnMgr) Option {
-	return func(tr *TcpTransport) error {
-		tr.sharedTcp = mgr
-		return nil
-	}
-}
-
 // TcpTransport is the TCP transport.
 type TcpTransport struct {
 	// Connection upgrader for upgrading insecure stream connections to

@@ -81,13 +81,6 @@ func WithTLSConfig(conf *tls.Config) Option {
 	}
 }
 
-func WithSharedTCP(mgr *tcpreuse.ConnMgr) Option {
-	return func(t *WebsocketTransport) error {
-		t.sharedTcp = mgr
-		return nil
-	}
-}
-
 // WebsocketTransport is the actual go-libp2p transport
 type WebsocketTransport struct {
 	upgrader transport.Upgrader
