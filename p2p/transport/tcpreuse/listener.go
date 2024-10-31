@@ -146,6 +146,8 @@ type multiplexedListener struct {
 	wg        sync.WaitGroup
 }
 
+var ErrListenerExists = errors.New("listener already exists for this conn type on this address")
+
 func (m *multiplexedListener) DemultiplexedListen(connType DemultiplexedConnType) (manet.Listener, error) {
 	if !connType.IsKnown() {
 		return nil, fmt.Errorf("unknown connection type: %s", connType)
@@ -153,13 +155,12 @@ func (m *multiplexedListener) DemultiplexedListen(connType DemultiplexedConnType
 
 	m.mx.Lock()
 	defer m.mx.Unlock()
-	l, ok := m.listeners[connType]
-	if ok {
-		return l, nil
+	if _, ok := m.listeners[connType]; ok {
+		return nil, ErrListenerExists
 	}
 
 	ctx, cancel := context.WithCancel(m.ctx)
-	l = &demultiplexedListener{
+	l := &demultiplexedListener{
 		buffer:     make(chan manet.Conn),
 		inner:      m.Listener,
 		ctx:        ctx,
