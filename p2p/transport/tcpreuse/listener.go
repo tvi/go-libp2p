@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/libp2p/go-libp2p/core/connmgr"
@@ -17,6 +18,9 @@ import (
 )
 
 const acceptQueueSize = 64 // It is fine to read 3 bytes from 64 connections in parallel.
+
+// How long we wait for a connection to be accepted before dropping it.
+const acceptTimeout = 30 * time.Second
 
 var log = logging.Logger("tcp-demultiplex")
 
@@ -221,6 +225,8 @@ func (m *multiplexedListener) run() error {
 		go func() {
 			defer func() { <-acceptQueue }()
 			defer m.wg.Done()
+			ctx, cancelCtx := context.WithTimeout(m.ctx, acceptTimeout)
+			defer cancelCtx()
 			t, c, err := identifyConnType(c)
 			if err != nil {
 				connScope.Done()
@@ -254,9 +260,8 @@ func (m *multiplexedListener) run() error {
 
 			select {
 			case demux.buffer <- connWithScope:
-			case <-m.ctx.Done():
+			case <-ctx.Done():
 				connWithScope.Close()
-				return
 			}
 		}()
 	}
