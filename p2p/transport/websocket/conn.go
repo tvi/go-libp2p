@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -24,7 +25,7 @@ type Conn struct {
 	secure             bool
 	DefaultMessageType int
 	reader             io.Reader
-	closeOnce          sync.Once
+	closeOnceVal       func() error
 	laddr              ma.Multiaddr
 	raddr              ma.Multiaddr
 
@@ -52,13 +53,15 @@ func NewConn(raw *ws.Conn, secure bool) *Conn {
 		return nil
 	}
 
-	return &Conn{
+	c := &Conn{
 		Conn:               raw,
 		secure:             secure,
 		DefaultMessageType: ws.BinaryMessage,
 		laddr:              laddr,
 		raddr:              raddr,
 	}
+	c.closeOnceVal = sync.OnceValue(c.closeOnceFn)
+	return c
 }
 
 // LocalMultiaddr implements manet.Conn.
@@ -142,27 +145,21 @@ func (c *Conn) Scope() network.ConnManagementScope {
 	return nil
 }
 
-// Close closes the connection. Only the first call to Close will receive the
-// close error, subsequent and concurrent calls will return nil.
+// Close closes the connection.
+// subsequent and concurrent calls will return the same error value.
 // This method is thread-safe.
-// TODO: Fix this ^
 func (c *Conn) Close() error {
-	var err error
-	c.closeOnce.Do(func() {
-		err1 := c.Conn.WriteControl(
-			ws.CloseMessage,
-			ws.FormatCloseMessage(ws.CloseNormalClosure, "closed"),
-			time.Now().Add(GracefulCloseTimeout),
-		)
-		err2 := c.Conn.Close()
-		switch {
-		case err1 != nil:
-			err = err1
-		case err2 != nil:
-			err = err2
-		}
-	})
-	return err
+	return c.closeOnceVal()
+}
+
+func (c *Conn) closeOnceFn() error {
+	err1 := c.Conn.WriteControl(
+		ws.CloseMessage,
+		ws.FormatCloseMessage(ws.CloseNormalClosure, "closed"),
+		time.Now().Add(GracefulCloseTimeout),
+	)
+	err2 := c.Conn.Close()
+	return errors.Join(err1, err2)
 }
 
 func (c *Conn) LocalAddr() net.Addr {
