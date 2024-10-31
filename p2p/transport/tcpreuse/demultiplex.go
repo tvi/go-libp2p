@@ -9,8 +9,6 @@ import (
 	manet "github.com/multiformats/go-multiaddr/net"
 )
 
-// TODO: We can unexport this type and rely completely on the multiaddr passed in to
-// DemultiplexedListen.
 type DemultiplexedConnType int
 
 const (
