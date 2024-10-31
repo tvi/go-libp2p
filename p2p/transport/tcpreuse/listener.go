@@ -111,6 +111,7 @@ func (t *ConnMgr) DemultiplexedListen(laddr ma.Multiaddr, connType Demultiplexed
 		t.mx.Lock()
 		defer t.mx.Unlock()
 		delete(t.listeners, laddr.String())
+		delete(t.listeners, l.Multiaddr().String())
 		return l.Close()
 	}
 	ml = &multiplexedListener{
@@ -121,14 +122,14 @@ func (t *ConnMgr) DemultiplexedListen(laddr ma.Multiaddr, connType Demultiplexed
 		connGater: t.connGater,
 		rcmgr:     t.rcmgr,
 	}
+	t.listeners[laddr.String()] = ml
+	t.listeners[l.Multiaddr().String()] = ml
 
 	dl, err := ml.DemultiplexedListen(connType)
 	if err != nil {
 		cerr := ml.Close()
 		return nil, errors.Join(err, cerr)
 	}
-
-	t.listeners[laddr.String()] = ml
 
 	ml.wg.Add(1)
 	go ml.run()

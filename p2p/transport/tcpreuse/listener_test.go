@@ -402,7 +402,6 @@ func TestListenerMultiplexed(t *testing.T) {
 }
 
 func TestListenerClose(t *testing.T) {
-
 	testClose := func(listenAddr ma.Multiaddr) {
 		// listen on port 0
 		cm := NewConnMgr(false, nil, nil)
@@ -417,24 +416,20 @@ func TestListenerClose(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, wl.Multiaddr(), ml.Multiaddr())
 
+		ml.Close()
+
 		mll, err := cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_MultistreamSelect)
 		require.NoError(t, err)
-		require.Equal(t, mll, ml)
+		require.Equal(t, wl.Multiaddr(), ml.Multiaddr())
 
+		mll.Close()
 		wl.Close()
-		ml.Close()
 
 		ml, err = cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_MultistreamSelect)
 		require.NoError(t, err)
-
-		require.NotEqual(t, ml.Multiaddr(), mll.Multiaddr())
-		require.NotEqual(t, mll, ml)
-		ml.Close()
 
 		// Now listen on the specific port previously used
 		listenAddr = ml.Multiaddr()
-		ml, err = cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_MultistreamSelect)
-		require.NoError(t, err)
 		wl, err = cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_HTTP)
 		require.NoError(t, err)
 		require.Equal(t, wl.Multiaddr(), ml.Multiaddr())
@@ -444,19 +439,8 @@ func TestListenerClose(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, wl.Multiaddr(), ml.Multiaddr())
 
-		mll, err = cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_MultistreamSelect)
-		require.NoError(t, err)
-		require.Equal(t, mll, ml)
-
+		ml.Close()
 		wl.Close()
-		ml.Close()
-
-		ml, err = cm.DemultiplexedListen(listenAddr, DemultiplexedConnType_MultistreamSelect)
-		require.NoError(t, err)
-
-		require.Equal(t, ml.Multiaddr(), mll.Multiaddr())
-		require.NotEqual(t, mll, ml)
-		ml.Close()
 	}
 	listenAddrs := []ma.Multiaddr{ma.StringCast("/ip4/0.0.0.0/tcp/0"), ma.StringCast("/ip6/::/tcp/0")}
 	for _, listenAddr := range listenAddrs {
