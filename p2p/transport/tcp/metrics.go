@@ -24,7 +24,7 @@ var (
 
 const collectFrequency = 10 * time.Second
 
-var defaultCollector *aggregatingCollector
+var collector *aggregatingCollector
 
 var initMetricsOnce sync.Once
 
@@ -34,8 +34,8 @@ func initMetrics() {
 	bytesSentDesc = prometheus.NewDesc("tcp_sent_bytes", "TCP bytes sent", nil, nil)
 	bytesRcvdDesc = prometheus.NewDesc("tcp_rcvd_bytes", "TCP bytes received", nil, nil)
 
-	defaultCollector = newAggregatingCollector()
-	prometheus.MustRegister(defaultCollector)
+	collector = newAggregatingCollector()
+	prometheus.MustRegister(collector)
 
 	const direction = "direction"
 
@@ -196,15 +196,13 @@ func (c *aggregatingCollector) Collect(metrics chan<- prometheus.Metric) {
 
 func (c *aggregatingCollector) ClosedConn(conn *tracingConn, direction string) {
 	c.mutex.Lock()
-	c.removeConn(conn.id)
+	collector.removeConn(conn.id)
 	c.mutex.Unlock()
 	closedConns.WithLabelValues(direction).Inc()
 }
 
 type tracingConn struct {
 	id uint64
-
-	collector *aggregatingCollector
 
 	startTime time.Time
 	isClient  bool
@@ -215,8 +213,7 @@ type tracingConn struct {
 	closeErr  error
 }
 
-// newTracingConn wraps a manet.Conn with a tracingConn. A nil collector will use the default collector.
-func newTracingConn(c manet.Conn, collector *aggregatingCollector, isClient bool) (*tracingConn, error) {
+func newTracingConn(c manet.Conn, isClient bool) (*tracingConn, error) {
 	initMetricsOnce.Do(func() { initMetrics() })
 	conn, err := tcp.NewConn(c)
 	if err != nil {
@@ -227,12 +224,8 @@ func newTracingConn(c manet.Conn, collector *aggregatingCollector, isClient bool
 		isClient:  isClient,
 		Conn:      c,
 		tcpConn:   conn,
-		collector: collector,
 	}
-	if tc.collector == nil {
-		tc.collector = defaultCollector
-	}
-	tc.id = tc.collector.AddConn(tc)
+	tc.id = collector.AddConn(tc)
 	newConns.WithLabelValues(tc.getDirection()).Inc()
 	return tc, nil
 }
@@ -246,7 +239,7 @@ func (c *tracingConn) getDirection() string {
 
 func (c *tracingConn) Close() error {
 	c.closeOnce.Do(func() {
-		c.collector.ClosedConn(c, c.getDirection())
+		collector.ClosedConn(c, c.getDirection())
 		c.closeErr = c.Conn.Close()
 	})
 	return c.closeErr
@@ -265,12 +258,10 @@ func (c *tracingConn) getTCPInfo() (*tcpinfo.Info, error) {
 
 type tracingListener struct {
 	manet.Listener
-	collector *aggregatingCollector
 }
 
-// newTracingListener wraps a manet.Listener with a tracingListener. A nil collector will use the default collector.
-func newTracingListener(l manet.Listener, collector *aggregatingCollector) *tracingListener {
-	return &tracingListener{Listener: l, collector: collector}
+func newTracingListener(l manet.Listener) *tracingListener {
+	return &tracingListener{Listener: l}
 }
 
 func (l *tracingListener) Accept() (manet.Conn, error) {
@@ -278,5 +269,5 @@ func (l *tracingListener) Accept() (manet.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newTracingConn(conn, l.collector, false)
+	return newTracingConn(conn, false)
 }
