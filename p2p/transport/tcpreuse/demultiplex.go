@@ -9,6 +9,9 @@ import (
 	manet "github.com/multiformats/go-multiaddr/net"
 )
 
+// This is readiung the first 3 bytes of the packet. It should be instant.
+const identifyConnTimeout = 1 * time.Second
+
 type DemultiplexedConnType int
 
 const (
@@ -40,7 +43,7 @@ func (t DemultiplexedConnType) IsKnown() bool {
 // It Callers must not use the passed in Conn after this
 // function returns. if an error is returned, the connection will be closed.
 func identifyConnType(c manet.Conn) (DemultiplexedConnType, manet.Conn, error) {
-	if err := c.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
+	if err := c.SetReadDeadline(time.Now().Add(identifyConnTimeout)); err != nil {
 		closeErr := c.Close()
 		return 0, nil, errors.Join(err, closeErr)
 	}
