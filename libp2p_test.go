@@ -761,6 +761,17 @@ func TestSharedTCPAddr(t *testing.T) {
 		ListenAddrStrings("/ip4/0.0.0.0/tcp/8888/ws"),
 	)
 	require.NoError(t, err)
-	fmt.Println(h.Addrs())
+	sawTCP := false
+	sawWS := false
+	for _, addr := range h.Addrs() {
+		if strings.HasSuffix(addr.String(), "/tcp/8888") {
+			sawTCP = true
+		}
+		if strings.HasSuffix(addr.String(), "/tcp/8888/ws") {
+			sawWS = true
+		}
+	}
+	require.True(t, sawTCP)
+	require.True(t, sawWS)
 	h.Close()
 }
